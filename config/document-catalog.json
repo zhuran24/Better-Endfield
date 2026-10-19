@@ -4613,7 +4613,7 @@
       "module": "actions",
       "type": "maintenance_reference",
       "status": "reference",
-      "game_version": "1.5.3",
+      "game_version": "1.5.3、1.6.3、1.6.4",
       "platform": [
         "Windows"
       ],
@@ -4653,6 +4653,12 @@
           "config_path": "config/workspace.defaults.json",
           "config_key": "game.version",
           "value": "1.5.3"
+        },
+        {
+          "kind": "document",
+          "path": "docs/actions/research/1.6.3/jsspsi-dash/JSSPSI_SUSTAINED_DASH.md",
+          "line": 3,
+          "excerpt": "机制分析、资源解包和第一份原版录制在 Windows 客户端 1.6.3 上做，2026-10-18 在 1.6.4 上实机验证。"
         }
       ],
       "replacement": "未见明确整体替代声明；按正文适用范围保留",
@@ -6261,6 +6267,94 @@
       "previously_archived": true
     },
     {
+      "module": "actions",
+      "type": "source_evidence",
+      "status": "evidence",
+      "game_version": "1.6.3",
+      "platform": [
+        "Windows"
+      ],
+      "legacy_path": null,
+      "path": "docs/actions/research/1.6.3/jsspsi-dash/JSSPSI_ACCESSORY_LOOP.md",
+      "title": "祀附属件平稳循环（2026-10-18）",
+      "evidence": [
+        {
+          "kind": "document",
+          "path": "docs/actions/research/1.6.3/jsspsi-dash/JSSPSI_ACCESSORY_LOOP.md",
+          "line": 1,
+          "excerpt": "祀附属件平稳循环（2026-10-18）"
+        }
+      ],
+      "purpose": "头发尾巴每圈甩的成因，附属件循环表的做法、格式、生成与验证",
+      "status_detail": "保留来源/验证定位",
+      "classification_source": "证据与来源",
+      "dates": [
+        "2026-10-15",
+        "2026-10-18"
+      ],
+      "game_version_evidence": [
+        {
+          "path": "docs/actions/research/1.6.3/jsspsi-dash/JSSPSI_ACCESSORY_LOOP.md",
+          "line": 3,
+          "excerpt": "成因分析和离线指标用 Windows 客户端 1.6.3 的右侧原版录制；随包发出的表用 1.6.4 的原版录制生成；2026-10-18 在 1.6.4 上实机验证。"
+        },
+        {
+          "kind": "workspace_config",
+          "excerpt": "工作区默认配置的当前游戏版本为 1.6.3；1.6.3 Windows 客户端期间的研究归在 research/1.6.3。",
+          "config_path": "config/workspace.defaults.json",
+          "config_key": "game.version",
+          "value": "1.6.3"
+        }
+      ],
+      "replacement": "未见明确整体替代声明；按正文适用范围保留",
+      "ownership": "documentation",
+      "game_version_note": "机制分析、资源解包和第一份原版录制在 1.6.3 Windows 客户端上做；1.6.4 只更新资源、GameAssembly 相同，实机验证在 1.6.4。"
+    },
+    {
+      "module": "actions",
+      "type": "source_evidence",
+      "status": "evidence",
+      "game_version": "1.6.3",
+      "platform": [
+        "Windows"
+      ],
+      "legacy_path": null,
+      "path": "docs/actions/research/1.6.3/jsspsi-dash/JSSPSI_SUSTAINED_DASH.md",
+      "title": "祀持续特殊冲刺的实现依据（2026-10-18）",
+      "evidence": [
+        {
+          "kind": "document",
+          "path": "docs/actions/research/1.6.3/jsspsi-dash/JSSPSI_SUSTAINED_DASH.md",
+          "line": 1,
+          "excerpt": "祀持续特殊冲刺的实现依据（2026-10-18）"
+        }
+      ],
+      "purpose": "冲刺结构、墨兽回绕、特效与声音、接缝修正、录制、日志与验收、游戏更新后的核对项",
+      "status_detail": "保留来源/验证定位",
+      "classification_source": "证据与来源",
+      "dates": [
+        "2026-10-15",
+        "2026-10-18"
+      ],
+      "game_version_evidence": [
+        {
+          "path": "docs/actions/research/1.6.3/jsspsi-dash/JSSPSI_SUSTAINED_DASH.md",
+          "line": 3,
+          "excerpt": "机制分析、资源解包和第一份原版录制在 Windows 客户端 1.6.3 上做，2026-10-18 在 1.6.4 上实机验证。"
+        },
+        {
+          "kind": "workspace_config",
+          "excerpt": "工作区默认配置的当前游戏版本为 1.6.3；1.6.3 Windows 客户端期间的研究归在 research/1.6.3。",
+          "config_path": "config/workspace.defaults.json",
+          "config_key": "game.version",
+          "value": "1.6.3"
+        }
+      ],
+      "replacement": "未见明确整体替代声明；按正文适用范围保留",
+      "ownership": "documentation",
+      "game_version_note": "机制分析、资源解包和第一份原版录制在 1.6.3 Windows 客户端上做；1.6.4 只更新资源、GameAssembly 相同，实机验证在 1.6.4。"
+    },
+    {
       "module": "workspace",
       "type": "source_evidence",
       "status": "evidence",
@@ -6951,13 +7045,13 @@
       "module": "actions",
       "type": "maintenance_reference",
       "status": "reference",
-      "game_version": "1.5.3",
+      "game_version": "1.5.3、1.6.3、1.6.4",
       "platform": [
         "unspecified"
       ],
       "legacy_path": "native/modules/actions/README.md",
       "path": "native/modules/actions/README.md",
-      "title": "冲刺持续模块 1.13.4",
+      "title": "冲刺持续模块 1.14.0",
       "evidence": [
         {
           "kind": "inventory",
@@ -6987,6 +7081,12 @@
           "config_path": "config/workspace.defaults.json",
           "config_key": "game.version",
           "value": "1.5.3"
+        },
+        {
+          "kind": "document",
+          "path": "docs/actions/research/1.6.3/jsspsi-dash/JSSPSI_SUSTAINED_DASH.md",
+          "line": 3,
+          "excerpt": "机制分析、资源解包和第一份原版录制在 Windows 客户端 1.6.3 上做，2026-10-18 在 1.6.4 上实机验证。"
         }
       ],
       "replacement": "未见明确整体替代声明；按正文适用范围保留",
@@ -7003,7 +7103,7 @@
       "module": "actions",
       "type": "source_evidence",
       "status": "evidence",
-      "game_version": "1.5.3",
+      "game_version": "1.5.3、1.6.3、1.6.4",
       "platform": [
         "unspecified"
       ],
@@ -7024,7 +7124,7 @@
           "excerpt": "冲刺持续姿态数据来源与说明"
         }
       ],
-      "purpose": "BEPOSE12角色/骨骼/帧数、生成脚本和分发契约",
+      "purpose": "BEPOSE12 姿态与祀 BEACC001 附属件表的角色、规格、生成工具和分发契约",
       "status_detail": "生产数据来源说明",
       "classification_source": "证据与来源",
       "dates": [],
@@ -7036,6 +7136,12 @@
           "config_path": "config/workspace.defaults.json",
           "config_key": "game.version",
           "value": "1.5.3"
+        },
+        {
+          "kind": "document",
+          "path": "docs/actions/research/1.6.3/jsspsi-dash/JSSPSI_SUSTAINED_DASH.md",
+          "line": 3,
+          "excerpt": "机制分析、资源解包和第一份原版录制在 Windows 客户端 1.6.3 上做，2026-10-18 在 1.6.4 上实机验证。"
         }
       ],
       "replacement": "未见明确整体替代声明；按正文适用范围保留",
@@ -7047,6 +7153,49 @@
       },
       "game_version_note": "按用户明确的九月初后 1.5.3 时间线与当前配置归类；原始来源与验证边界保留，热更新差异由资源快照记录。",
       "resource_snapshot_evidence": []
+    },
+    {
+      "module": "actions",
+      "type": "maintenance_reference",
+      "status": "reference",
+      "game_version": "1.6.3",
+      "platform": [
+        "unspecified"
+      ],
+      "legacy_path": "tools/actions/jsspsi_accessory/README.md",
+      "path": "tools/actions/jsspsi_accessory/README.md",
+      "title": "祀附属件循环表生成工具",
+      "evidence": [
+        {
+          "kind": "document",
+          "path": "tools/actions/jsspsi_accessory/README.md",
+          "line": 1,
+          "excerpt": "祀附属件循环表生成工具"
+        }
+      ],
+      "purpose": "从左右原版冲刺录制生成 accessory_jsspsi.bin 的输入、命令、验收与精简比较",
+      "status_detail": "工具邻接使用说明",
+      "classification_source": "维护接口",
+      "dates": [
+        "2026-10-18"
+      ],
+      "game_version_evidence": [
+        {
+          "path": "tools/actions/jsspsi_accessory/README.md",
+          "line": 85,
+          "excerpt": "仓库里的表就是用默认参数从 1.6.4 的四份录制这样生成的，输入的 SHA-256 见研究文档 §3.2。"
+        },
+        {
+          "kind": "workspace_config",
+          "excerpt": "工作区默认配置的当前游戏版本为 1.6.3；1.6.3 Windows 客户端期间的研究归在 research/1.6.3。",
+          "config_path": "config/workspace.defaults.json",
+          "config_key": "game.version",
+          "value": "1.6.3"
+        }
+      ],
+      "replacement": "未见明确整体替代声明；按正文适用范围保留",
+      "ownership": "external_read_only",
+      "game_version_note": "工具里的状态 hash、回绕区间和剪辑时长取自 1.6.3/1.6.4 客户端的祀冲刺；游戏改了这段动画要改工具常量并重新生成。"
     },
     {
       "module": "custom_model",
@@ -8135,6 +8284,34 @@
           "path": "docs/actions/research/1.5.3/INDEX.md",
           "line": 1,
           "excerpt": "动作与特殊冲刺：游戏版本 1.5.3"
+        }
+      ],
+      "ownership": "documentation",
+      "generated_navigation": true,
+      "game_version_evidence": [
+        {
+          "kind": "navigation",
+          "excerpt": "版本研究索引沿用所属目录与所索引文档的版本归类。"
+        }
+      ]
+    },
+    {
+      "module": "actions",
+      "type": "navigation",
+      "status": "navigation",
+      "game_version": "1.6.3",
+      "platform": [
+        "unspecified"
+      ],
+      "legacy_path": null,
+      "path": "docs/actions/research/1.6.3/INDEX.md",
+      "title": "动作与特殊冲刺：游戏版本 1.6.3",
+      "evidence": [
+        {
+          "kind": "document",
+          "path": "docs/actions/research/1.6.3/INDEX.md",
+          "line": 1,
+          "excerpt": "动作与特殊冲刺：游戏版本 1.6.3"
         }
       ],
       "ownership": "documentation",

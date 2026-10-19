@@ -160,6 +160,26 @@ class RegistryBoundaryTests(unittest.TestCase):
         _, error = runner.receipt_check(self.ws, suite(self.entry), self.source)
         self.assertIn("Missing build receipt", error)
 
+    def test_changed_inline_and_header_invalidate_native_receipt(self):
+        fixture_root = self.ws.root
+        for suffix in (".inl", ".h"):
+            self.ws = FixtureWorkspace(fixture_root / suffix[1:])
+            source = self.ws.root / ("native/module/frame" + suffix)
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("before")
+            relative = source.relative_to(self.ws.root).as_posix().encode() + b"\0"
+            def git_output(root, *args):
+                return b"fixture-commit\n" if args[0] == "rev-parse" else relative
+            with patch.object(runner, "git_bytes", side_effect=git_output):
+                before = runner.source_record(self.ws.root)
+                self.source = before
+                self.make_receipt()
+                source.write_text("after")
+                after = runner.source_record(self.ws.root)
+                self.assertNotEqual(before["code_revision"], after["code_revision"])
+                _, error = runner.receipt_check(self.ws, suite(self.entry), after)
+                self.assertIn("code revision", error)
+
     def test_native_receipt_requires_exact_commit_dirty_revision_and_artifacts(self):
         path, receipt, _ = self.make_receipt()
         evidence, error = runner.receipt_check(self.ws, suite(self.entry), self.source)

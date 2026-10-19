@@ -121,7 +121,7 @@ def main():
         else:
             fields = class_lookup.get(key, {}).get('fields', [])
             candidates = [x for x in fields if x['name'] == record['name']]
-            exact = [x for x in candidates if 'type' not in record or normalize_type(x['type']) == record['type']]
+            exact = [x for x in candidates if not record.get('type') or normalize_type(x['type']) == record['type']]
             record['status'] = 'matched' if len(exact) == 1 else 'missing' if not candidates else 'type-review'
             if candidates:
                 record['actual'] = candidates
@@ -138,8 +138,10 @@ def main():
     instance_ids = ['Start','PreLate','Interrupt','ForceStop','ForceCurrent','Release','SetDashing',
                     'FlowTick','PerformClear','AddCommand','CrossFade','TryInterruptCommand','DoExit','ShowObject',
                     'AudioMonoPost','AudioMonoComponent','EffectDuration','EffectFinish','EffectStop',
-                    'EffectActionPlay','EffectManualFollow','MeshGroupShow','VisualPerformId','VisualPerformEntity','PoseTail']
-    static_ids = ['ShouldInterrupt','AudioEntityPost','AudioHash','UnityAlive']
+                    'EffectActionPlay','EffectManualFollow','MeshGroupShow','VisualPerformId','VisualPerformEntity','PoseTail',
+                    'JsspsiTmpAnimator','ComponentGameObject','TransformParent','JsspsiPlayRenderVfx','JsspsiPlayVfx',
+                    'JsspsiVfxTick','JsspsiVfxDelta','JsspsiClothUpdate']
+    static_ids = ['ShouldInterrupt','AudioEntityPost','AudioHash','UnityAlive','JsspsiPostEvent','JsspsiStopPlaying']
     for ident, expected_static in [(x, False) for x in instance_ids]+[(x, True) for x in static_ids]:
         actual = matched_methods.get(ident)
         status = 'matched' if actual and ('static' in actual['modifiers']) == expected_static else 'abi-review'

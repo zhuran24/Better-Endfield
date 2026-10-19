@@ -1262,6 +1262,7 @@ public sealed partial class MainWindow : Window
         {
             ContinuousSpecialDashAglinaEnabled = ContinuousSpecialDashAglinaToggle.IsOn,
             ContinuousSpecialDashLiinoEnabled = ContinuousSpecialDashLiinoToggle.IsOn,
+            ContinuousSpecialDashJsspsiEnabled = ContinuousSpecialDashJsspsiToggle.IsOn,
             LiinoCleanDashEnabled = LiinoCleanDashToggle.IsOn,
         };
         try
@@ -3298,6 +3299,7 @@ public sealed partial class MainWindow : Window
             FreeCameraEnabled = FreeCameraToggle.IsOn,
             ContinuousSpecialDashAglinaEnabled = ContinuousSpecialDashAglinaToggle.IsOn,
             ContinuousSpecialDashLiinoEnabled = ContinuousSpecialDashLiinoToggle.IsOn,
+            ContinuousSpecialDashJsspsiEnabled = ContinuousSpecialDashJsspsiToggle.IsOn,
             LiinoCleanDashEnabled = LiinoCleanDashToggle.IsOn,
             DisableDitherEnabled = DisableDitherToggle.IsOn,
             PauseGameInFreeCamera = PauseGameInFreeCameraToggle.IsOn,
@@ -3374,6 +3376,7 @@ public sealed partial class MainWindow : Window
         _mediaCaptureService.Configure(configuration.MediaScreen);
         ContinuousSpecialDashAglinaToggle.IsOn = configuration.ContinuousSpecialDashAglinaEnabled;
         ContinuousSpecialDashLiinoToggle.IsOn = configuration.ContinuousSpecialDashLiinoEnabled;
+        ContinuousSpecialDashJsspsiToggle.IsOn = configuration.ContinuousSpecialDashJsspsiEnabled;
         LiinoCleanDashToggle.IsOn = configuration.LiinoCleanDashEnabled;
         DisableDitherToggle.IsOn = configuration.DisableDitherEnabled;
         PauseGameInFreeCameraToggle.IsOn = configuration.PauseGameInFreeCamera;
@@ -4168,6 +4171,9 @@ public sealed partial class MainWindow : Window
         ContinuousSpecialDashLiinoToggle.Header = isZh ? "梨诺" : "Liino";
         ContinuousSpecialDashLiinoToggle.OffContent = isZh ? "关闭" : "Disabled";
         ContinuousSpecialDashLiinoToggle.OnContent = isZh ? "开启" : "Enabled";
+        ContinuousSpecialDashJsspsiToggle.Header = isZh ? "祀" : "Jsspsi";
+        ContinuousSpecialDashJsspsiToggle.OffContent = isZh ? "关闭" : "Disabled";
+        ContinuousSpecialDashJsspsiToggle.OnContent = isZh ? "开启" : "Enabled";
         LiinoCleanDashToggle.Header = isZh ? "隐藏机甲与光效" : "Hide mech and effects";
         LiinoCleanDashToggle.OffContent = isZh ? "关闭" : "Disabled";
         LiinoCleanDashToggle.OnContent = isZh ? "开启" : "Enabled";

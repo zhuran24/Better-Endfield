@@ -3,13 +3,14 @@ package dev.betterendfield.next;
 import android.content.Context;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.function.Consumer;
 
 /**
- * Materializes the sustained-dash bone-pose banks where the game process can read
+ * Materializes the sustained-dash pose and accessory banks where the game process can read
  * them.
  *
  * On desktop the module DLL finds {@code actions/pose_<codename>.bin} beside
@@ -18,12 +19,12 @@ import java.util.function.Consumer;
  * The native side is told where through
  * {@code BETTER_ENDFIELD_NEXT_ACTIONS_ASSET_ROOT}.
  *
- * Only the optional bone-pose overlay needs them. Without them the module still
+ * The optional pose and accessory overlays need them. Without them the module still
  * holds the dash through the native route and says so in its log.
  */
 final class ActionPoseAssets {
     private static final String ASSET_DIRECTORY = "actions";
-    private static final String[] BANKS = {"pose_aglina.bin", "pose_liino.bin"};
+    private static final String[] BANKS = {"pose_aglina.bin", "pose_liino.bin", "accessory_jsspsi.bin"};
 
     private ActionPoseAssets() {}
 
@@ -51,14 +52,28 @@ final class ActionPoseAssets {
         return target.getAbsolutePath();
     }
 
+    private static boolean sameContents(Context module, String asset, File target) throws IOException {
+        try (InputStream source = module.getAssets().open(asset);
+             InputStream existing = new FileInputStream(target)) {
+            byte[] expected = new byte[64 * 1024];
+            byte[] actual = new byte[64 * 1024];
+            for (int count; (count = source.read(expected)) != -1;) {
+                int offset = 0;
+                while (offset < count) {
+                    int read = existing.read(actual, offset, count - offset);
+                    if (read < 0) return false;
+                    offset += read;
+                }
+                for (int i = 0; i < count; ++i) if (expected[i] != actual[i]) return false;
+            }
+            return existing.read() == -1;
+        }
+    }
+
     private static boolean copy(Context module, String name, File target) throws IOException {
         String asset = ASSET_DIRECTORY + "/" + name;
         try (InputStream source = module.getAssets().open(asset)) {
-            // available() is exact for an uncompressed asset, and these banks are
-            // stored, not deflated. A size match means the copy is already current;
-            // rewriting 1.3 MB on every launch would be pure start-up cost.
-            int expected = source.available();
-            if (target.isFile() && expected > 0 && target.length() == expected) return true;
+            if (target.isFile() && sameContents(module, asset, target)) return true;
             File temporary = new File(target.getParentFile(), name + ".tmp");
             try (FileOutputStream sink = new FileOutputStream(temporary, false)) {
                 byte[] buffer = new byte[64 * 1024];

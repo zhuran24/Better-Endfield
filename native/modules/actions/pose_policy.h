@@ -13,6 +13,12 @@ struct PoseVector { float x=0,y=0,z=0; };
 struct PoseQuaternion { float x=0,y=0,z=0,w=1; };
 struct BonePose { PoseQuaternion rotation; PoseVector position; };
 static_assert(sizeof(BonePose)==28);
+inline bool PoseFinite(const BonePose& pose) {
+    for (float value : {pose.rotation.x, pose.rotation.y, pose.rotation.z, pose.rotation.w,
+                       pose.position.x, pose.position.y, pose.position.z})
+        if (!std::isfinite(value)) return false;
+    return true;
+}
 inline float PoseDot(PoseQuaternion a,PoseQuaternion b){return a.x*b.x+a.y*b.y+a.z*b.z+a.w*b.w;}
 inline PoseQuaternion PoseNormalize(PoseQuaternion q){float n=std::sqrt(PoseDot(q,q));return {q.x/n,q.y/n,q.z/n,q.w/n};}
 inline PoseQuaternion PoseSlerp(PoseQuaternion a,PoseQuaternion b,float t){

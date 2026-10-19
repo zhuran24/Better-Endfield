@@ -922,6 +922,217 @@
       ]
     },
     {
+      "id": "actions.jsspsi",
+      "module": "actions",
+      "kind": "simulation",
+      "platform": [
+        "Windows"
+      ],
+      "game_version": [
+        "any"
+      ],
+      "input": {
+        "id": "source-fixtures",
+        "type": "synthetic"
+      },
+      "prerequisite": [
+        {
+          "type": "source",
+          "path": "native/modules/actions/jsspsi_tests.cpp"
+        }
+      ],
+      "entry": {
+        "type": "native",
+        "cwd": ".",
+        "sources": [
+          "native/modules/actions/jsspsi_tests.cpp"
+        ],
+        "executable": "windows/win-x64/Release/native/Release/BetterEndfieldNext.ActionsJsspsiTests.exe",
+        "artifacts": [
+          "windows/win-x64/Release/native/Release/BetterEndfieldNext.ActionsJsspsiTests.exe"
+        ],
+        "receipt": "tests/receipts/actions.jsspsi.json",
+        "configuration": "Release"
+      },
+      "status": "active",
+      "replaced_by": null,
+      "purpose": "Check profile configuration, optional contracts, ending-splash skipping and render/audio hooks; excluded target.",
+      "host_platform": [
+        "Windows"
+      ]
+    },
+    {
+      "id": "actions.seam",
+      "module": "actions",
+      "kind": "simulation",
+      "platform": [
+        "Windows"
+      ],
+      "game_version": [
+        "any"
+      ],
+      "input": {
+        "id": "source-fixtures",
+        "type": "synthetic"
+      },
+      "prerequisite": [
+        {
+          "type": "source",
+          "path": "native/modules/actions/seam_table_tests.cpp"
+        }
+      ],
+      "entry": {
+        "type": "native",
+        "cwd": ".",
+        "sources": [
+          "native/modules/actions/seam_table_tests.cpp"
+        ],
+        "executable": "windows/win-x64/Release/native/Release/BetterEndfieldNext.ActionsSeamTests.exe",
+        "artifacts": [
+          "windows/win-x64/Release/native/Release/BetterEndfieldNext.ActionsSeamTests.exe"
+        ],
+        "receipt": "tests/receipts/actions.seam.json",
+        "configuration": "Release"
+      },
+      "status": "active",
+      "replaced_by": null,
+      "purpose": "Validate BESEAM03 values, bounds and endpoint correction; excluded target.",
+      "host_platform": [
+        "Windows"
+      ]
+    },
+    {
+      "id": "actions.accessory_overlay",
+      "module": "actions",
+      "kind": "simulation",
+      "platform": [
+        "Windows"
+      ],
+      "game_version": [
+        "any"
+      ],
+      "input": {
+        "id": "source-fixtures",
+        "type": "synthetic"
+      },
+      "prerequisite": [
+        {
+          "type": "source",
+          "path": "native/modules/actions/accessory_overlay_tests.cpp"
+        }
+      ],
+      "entry": {
+        "type": "native",
+        "cwd": ".",
+        "sources": [
+          "native/modules/actions/accessory_overlay_tests.cpp",
+          "native/modules/actions/accessory_test_host.h",
+          "native/modules/actions/lifecycle_regressions.inl",
+          "native/modules/actions/dash_calls.inl",
+          "native/modules/actions/dash_feature_guard.inl",
+          "native/modules/actions/dash_pose_lease.inl",
+          "native/modules/actions/capture.inl",
+          "native/modules/actions/unity_hierarchy.inl"
+        ],
+        "executable": "windows/win-x64/Release/native/Release/BetterEndfieldNext.ActionsAccessoryOverlayTests.exe",
+        "artifacts": [
+          "windows/win-x64/Release/native/Release/BetterEndfieldNext.ActionsAccessoryOverlayTests.exe"
+        ],
+        "receipt": "tests/receipts/actions.accessory_overlay.json",
+        "configuration": "Release"
+      },
+      "status": "active",
+      "replaced_by": null,
+      "purpose": "Run all accessory ownership, seam, reentry and fade regressions by default using the production module; excluded target.",
+      "host_platform": [
+        "Windows"
+      ]
+    },
+    {
+      "id": "actions.accessory_table",
+      "module": "actions",
+      "kind": "simulation",
+      "platform": [
+        "Windows"
+      ],
+      "game_version": [
+        "any"
+      ],
+      "input": {
+        "id": "source-fixtures",
+        "type": "synthetic"
+      },
+      "prerequisite": [
+        {
+          "type": "source",
+          "path": "native/modules/actions/accessory_table_tests.cpp"
+        }
+      ],
+      "entry": {
+        "type": "native",
+        "cwd": ".",
+        "sources": [
+          "native/modules/actions/accessory_table_tests.cpp"
+        ],
+        "executable": "windows/win-x64/Release/native/Release/BetterEndfieldNext.ActionsAccessoryTests.exe",
+        "artifacts": [
+          "windows/win-x64/Release/native/Release/BetterEndfieldNext.ActionsAccessoryTests.exe"
+        ],
+        "receipt": "tests/receipts/actions.accessory_table.json",
+        "configuration": "Release"
+      },
+      "status": "active",
+      "replaced_by": null,
+      "purpose": "Validate BEACC001 bounds, UTF-8, masks, cyclic sampling and malformed input; excluded target.",
+      "host_platform": [
+        "Windows"
+      ]
+    },
+    {
+      "id": "actions.ini_preservation",
+      "module": "actions",
+      "kind": "offline",
+      "platform": [
+        "Windows"
+      ],
+      "game_version": [
+        "any"
+      ],
+      "input": {
+        "id": "source-fixtures",
+        "type": "synthetic"
+      },
+      "prerequisite": [
+        {
+          "type": "tool",
+          "key": "tools.dotnet"
+        }
+      ],
+      "entry": {
+        "type": "native",
+        "cwd": ".",
+        "sources": [
+          "ui/tests/ActionIniPreservation/ActionIniPreservation.csproj",
+          "ui/tests/ActionIniPreservation/Program.cs",
+          "ui/BetterEndfieldNext.UI/Services/ActionIniPreservation.cs"
+        ],
+        "executable": "next/dotnet/ActionIniPreservation/AnyCPU/bin/Release/net9.0/ActionIniPreservation.exe",
+        "artifacts": [
+          "next/dotnet/ActionIniPreservation/AnyCPU/bin/Release/net9.0/ActionIniPreservation.exe",
+          "next/dotnet/ActionIniPreservation/AnyCPU/bin/Release/net9.0/ActionIniPreservation.dll",
+          "next/dotnet/ActionIniPreservation/AnyCPU/bin/Release/net9.0/ActionIniPreservation.deps.json",
+          "next/dotnet/ActionIniPreservation/AnyCPU/bin/Release/net9.0/ActionIniPreservation.runtimeconfig.json"
+        ],
+        "receipt": "tests/receipts/actions.ini_preservation.json"
+      },
+      "status": "active",
+      "replaced_by": null,
+      "purpose": "Production Actions INI preservation across section and full saves.",
+      "host_platform": [
+        "Windows"
+      ]
+    },
+    {
       "id": "creator.bem.format",
       "module": "creator",
       "kind": "offline",

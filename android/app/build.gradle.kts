@@ -175,7 +175,7 @@ val prepareAndroidResourceAssets by tasks.registering(Sync::class) {
     // Same layout the desktop module reads from beside its DLL, so one set of
     // bone-pose banks serves both platforms.
     from(rootProject.file("../native/modules/actions/assets")) {
-        include("pose_*.bin")
+        include("pose_*.bin", "accessory_jsspsi.bin")
         into("actions")
     }
     into(generatedAssets)

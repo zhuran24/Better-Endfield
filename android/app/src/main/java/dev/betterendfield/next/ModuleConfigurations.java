@@ -39,8 +39,8 @@ record ModuleConfigurations(
     }
 
     /**
-     * The sustained-dash module always drives its loop from the bundled bone-pose
-     * banks, so they are materialized whenever that module is configured at all.
+     * Materialize the optional bone-pose banks and Jsspsi accessory table whenever
+     * the sustained-dash module is configured.
      */
     boolean needsActionPoses() {
         return !actions.isEmpty();

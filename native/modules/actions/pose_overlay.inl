@@ -1,8 +1,6 @@
 // Main-thread, character-scoped visual overlay. No controller replacement,
 // Animator disable, world-root movement, scale writes or AssetBundle calls.
 bool g_pose_contract = true;
-const BE_PoseLeaseApiV1* g_pose_leases = nullptr;
-std::atomic_bool g_pose_lease_ready{false};
 TickFn g_pose_tail = nullptr;
 PoseBank g_pose_bank;
 const CharacterProfile* g_pose_data_profile = nullptr;
@@ -26,6 +24,7 @@ bool PoseReadLocal(void* transform,BonePose& value){
     value.rotation=PoseNormalize(value.rotation);return true;
 }
 bool PoseWriteLocal(void* transform,const BonePose& value){
+    if(!PoseFinite(value))return false;
     bool ok=true;BonePose copy=value;void* args[]{&copy.position,&copy.rotation};Invoke(PoseSetLocal,transform,args,ok);return ok;
 }
 void FreePoseOwner(PoseOwner& owner){
@@ -58,6 +57,21 @@ void ReleasePoseOverlay(bool restore){
     }
     FreePoseOwner(old);
 }
+// Data and writable caches share LoadPoseBank's platform directory convention.
+std::filesystem::path ActionsDataFile(const char* filename) {
+#if defined(_WIN32)
+    wchar_t name[32768]{};
+    HMODULE module = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&ActionsDataFile), &module) ||
+        !GetModuleFileNameW(module, name, static_cast<DWORD>(std::size(name)))) return {};
+    return std::filesystem::path(name).parent_path() / L"actions" / filename;
+#else
+    const char* root = std::getenv("BETTER_ENDFIELD_NEXT_ACTIONS_ASSET_ROOT");
+    return root && *root ? std::filesystem::path(root) / filename : std::filesystem::path{};
+#endif
+}
+
 bool LoadPoseBank(const CharacterProfile* profile){
     if(g_pose_data_profile==profile)return g_pose_data_ready;
     g_pose_data_profile=profile;g_pose_data_ready=false;
@@ -86,7 +100,7 @@ bool LoadPoseBank(const CharacterProfile* profile){
 }
 bool BeginPoseOverlay(void* component,const CharacterProfile* profile){
     ReleasePoseOverlay(true);
-    if(!g_pose_contract||!profile||!LoadPoseBank(profile))return false;
+    if(!g_pose_contract||!profile||!profile->pose_file||!LoadPoseBank(profile))return false;
     using StringNew=void*(*)(const char*);
     auto string_new=reinterpret_cast<StringNew>(GetProcAddress(GetModuleHandleW(L"GameAssembly.dll"),"il2cpp_string_new"));
     if(!string_new)return false;
@@ -140,7 +154,7 @@ void ApplyPoseOverlay(void* component,float delta){
     Frame frame{};int hash=0;bool read=ReadFrame(component,frame,hash);
     const auto config=g_config.load();
     bool allowed=read&&g_session.component==component&&g_session.policy.active&&config->enabled&&config->external_loop&&
-        g_session.config==config&&frame.current_special&&!frame.outgoing&&CurrentRequestHandle(component)==g_session.handle;
+        RefreshSessionConfiguration(config)&&frame.current_special&&!frame.outgoing&&CurrentRequestHandle(component)==g_session.handle;
     if(generation!=g_pose_generation)return;
     if(!allowed&&g_pose_owner.clock.state!=PoseClock::State::Waiting)g_pose_owner.clock.End();
     const int side=hash==g_hashes[0]?0:hash==g_hashes[1]?1:-1;
@@ -181,4 +195,11 @@ void ApplyPoseOverlay(void* component,float delta){
 void __fastcall PoseTailDetour(void* component,float delta,const void* method){
     g_pose_tail(component,delta,method);
     ApplyPoseOverlay(component,delta);
+    if (g_accessory_live.load(std::memory_order_relaxed) || DashFeaturesActive()) GuardDashFeatures([&] {
+        AccessoryPrepareFrame(component);
+        SeamFixFrame(component);
+        AccessoryApplyFrame(component);
+        AccessoryFadeFrame(component);
+        CaptureFrame(component);
+    });
 }

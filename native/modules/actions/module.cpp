@@ -2,6 +2,8 @@
 #include "BetterEndfieldNext/PoseLease.h"
 #include "dash_policy.h"
 #include "pose_policy.h"
+#include "accessory_table.h"
+#include "seam_table.h"
 #include <fstream>
 
 #include <Windows.h>
@@ -15,6 +17,11 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
+#include <optional>
+#include <functional>
+#include <cstdlib>
 
 namespace BetterEndfieldNext::Actions {
 namespace {
@@ -54,6 +61,30 @@ struct CharacterProfile {
     // board at 2.2 s). Deferring those hides keeps the parts visible while the
     // dash repeats; the native Clear still restores them on exit.
     bool defer_mesh_group_hide;
+    // Accept the exact perform name or one trailing L/R.
+    bool side_suffixed_perform = false;
+    // Synchronize temporary companion 0 to the rider rewind.
+    bool rewind_mount = false;
+    // Independent window for temporary companions 1 and 2.
+    const LoopConstants* side_loop = nullptr;
+    // Actor masks are local to the owned perform; Jsspsi uses unnamed beast effects.
+    uint32_t held_effect_actors = 0;
+    // Ending-only effects suppressed before native OnPlay (capture is exempt).
+    uint32_t skipped_effect_actors = 0;
+    // Freeze collected beast-render clocks after the first rewind.
+    bool freeze_render_vfx = false;
+    // Stop the captured startup event at the first rewind.
+    bool stop_start_sound = false;
+    // Learned BESEAM03 endpoint corrections, one token per root.
+    const char* seam_file = nullptr;
+    // BEACC001 phase-sampled overlay, released through an exit fade.
+    const char* accessory_file = nullptr;
+    // BECAP001 native-clip recording output when capture is selected.
+    const char* capture_file = nullptr;
+    // Name token identifying owned VFX and character audio sources.
+    const char* owned_name_token = nullptr;
+    // Additional audio-source token for companion objects.
+    const char* companion_name_filter = nullptr;
 };
 constexpr CharacterProfile kCharacters[]{
     {"aglina", "chr_0013_aglina", "CharIntPerform_Aglina_Spdash", L"pose_aglina.bin", kAglinaLoop,
@@ -76,6 +107,31 @@ constexpr CharacterProfile kCharacters[]{
       "P_fxbat_liino_sprint_dash_sp_weapons_base_L_a_01_jnt_lvdong",
       "P_fxbat_liino_sprint_dash_sp_weapons_base_R_a_01_jnt_lvdong"}, false,
      nullptr, {}, true},
+    // Jsspsi keeps the native Animator: no full-pose bank. Beast 0 follows
+    // her rewind; beasts 1 and 2 use the independent side window.
+    {
+     /*codename=*/"jsspsi",
+     /*template_id=*/"chr_0036_jsspsi",
+     /*perform_id=*/"CharIntPerform_Jsspsi_Spdash",
+     /*pose_file=*/nullptr,
+     /*loop=*/kJsspsiLoop,
+     /*effects=*/{},
+     /*renew_short_glow=*/false,
+     /*flying_stop_event=*/nullptr,
+     /*prop_hide=*/{},
+     /*defer_mesh_group_hide=*/true,
+     /*side_suffixed_perform=*/true,
+     /*rewind_mount=*/true,
+     /*side_loop=*/&kJsspsiSideLoop,
+     /*held_effect_actors=*/kJsspsiHoldEffects,
+     /*skipped_effect_actors=*/kJsspsiSkipEffects,
+     /*freeze_render_vfx=*/true,
+     /*stop_start_sound=*/true,
+     /*seam_file=*/"seam_jsspsi.bin",
+     /*accessory_file=*/"accessory_jsspsi.bin",
+     /*capture_file=*/"capture_jsspsi.bin",
+     /*owned_name_token=*/"jsspsi",
+     /*companion_name_filter=*/"inkbiter"},
 };
 constexpr size_t kCharacterCount = std::size(kCharacters);
 
@@ -87,6 +143,11 @@ struct Configuration {
     // One bit per kCharacters entry. A configuration without the key predates the
     // per-character switches and keeps every supported character armed.
     uint32_t characters = (1u << kCharacterCount) - 1;
+    bool jsspsi_capture = false;
+    bool jsspsi_seam_fix = true;
+    bool jsspsi_accessory_loop = true;
+    uint32_t jsspsi_accessory_mask = 0x03;
+    float jsspsi_accessory_fade = .4f;
     bool operator==(const Configuration&) const = default;
 };
 #if defined(_WIN32)
@@ -138,7 +199,9 @@ enum MethodId {
     ControllerGet, ControllerSet, ControllerClips, OverrideCtor, OverrideClip,
     CurrentClipInfos, InfoClip, DestroyOwned,
     PoseTail, PoseComponentTransform, PoseFind, PoseGetLocal, PoseSetLocal, PoseFrameCount, PoseIsChild,
-    MeshGroupShow, EffectActionPlay, EffectManualFollow, VisualPerformId, VisualPerformEntity, MethodCount
+    MeshGroupShow, EffectActionPlay, EffectManualFollow, VisualPerformId, VisualPerformEntity,
+    JsspsiTmpAnimator, ComponentGameObject, TransformParent, JsspsiPlayRenderVfx, JsspsiPlayVfx,
+    JsspsiVfxTick, JsspsiVfxDelta, JsspsiClothUpdate, JsspsiPostEvent, JsspsiStopPlaying, MethodCount
 };
 struct Method { BE_MethodDescriptorV1 desc; BE_ResolvedMethodV1 resolved{}; };
 Method g_methods[] = {
@@ -228,11 +291,21 @@ Method g_methods[] = {
     {{kGame,"Beyond.Gameplay","EffectInstance","ManualUpdateFollow",nullptr,"System.Void",0}},
     {{kGame,kPerformNs,kHandle,"get_interactPerformId",nullptr,"System.String",0}},
     {{kGame,kPerformNs,kHandle,"get_entity",nullptr,"Beyond.Gameplay.Core.Entity",0}},
+    {{kGame,kPerformNs,"TmpObjectInst","get_animator",nullptr,"UnityEngine.Animator",0}},
+    {{kUnityCore,"UnityEngine","Component","get_gameObject",nullptr,"UnityEngine.GameObject",0}},
+    {{kUnityCore,"UnityEngine","Transform","get_parent",nullptr,"UnityEngine.Transform",0}},
+    {{kGame,"Beyond.Gameplay","EffectInstance","PlayRenderVfx",nullptr,"System.Void",0}},
+    {{kGame,kView,"EntityVFX","PlayVFX","System.String","System.Void",1}},
+    {{kGame,kView,"EntityVFX","Tick","System.Single","System.Void",1}},
+    {{"Rendering.Beyond.dll","Beyond.Rendering","EntityVFXControllerBase","GetDeltaTimeFromLastTick","System.Boolean","System.Single",1}},
+    {{"BeyondDynamicBone.dll","BeyondDynamicBone","ClothManager","ClothUpdate",nullptr,"System.Void",0}},
+    {{"Audio.Beyond.dll","Beyond.Audio","AudioAdapter","_PostEvent","System.UInt32|System.UInt64|Beyond.Audio.AudioCallbackType|Beyond.Audio.AudioEventCallback|System.Object","System.UInt32",5}},
+    {{"Audio.Beyond.dll","Beyond.Audio","AudioAdapter","StopByPlayingId","System.UInt32|System.Int32","System.Void",2}},
 };
 static_assert(std::size(g_methods) == MethodCount);
 struct Field { BE_FieldDescriptorV1 desc; BE_ResolvedFieldV1 resolved{}; };
 enum FieldId { TemplateId, Request, RequestHandle, HasCommand,
-    CommandType, CommandReason, ActionLogic, ActionIndex, ActionShow, ActionDelay, Effects, VisualActionHandle, VisualActionData, FieldCount };
+    CommandType, CommandReason, ActionLogic, ActionIndex, ActionShow, ActionDelay, Effects, VisualActionHandle, VisualActionData, JsspsiTmpObjects, JsspsiRenderHelper, JsspsiHelperVfx, JsspsiVfxOwner, FieldCount };
 Field g_fields[] = {
     {{kGame,"Beyond.Gameplay","GameDataWithId","id","System.String"}},
     {{kGame,kView,kCharacterComp,"m_currentRequest","Beyond.Gameplay.View.CharacterAnimationComponent.PerformRequest"}},
@@ -247,6 +320,10 @@ Field g_fields[] = {
     {{kGame,kPerformNs,kHandle,"m_effects","System.Collections.Generic.Dictionary<System.Int32,Beyond.ObjectPtr<Beyond.Gameplay.EffectInstance>>"}},
     {{kGame,kPerformNs,"CharInteractPerformActionBase","m_handle","Beyond.Gameplay.Core.CharInteractPerform.CharPerformHandleBase"}},
     {{kGame,kPerformNs,"CharInteractPerformActionBase","m_actionData","Beyond.Gameplay.Core.CharInteractPerform.CharInteractPerformActionData"}},
+    {{kGame,kPerformNs,kHandle,"m_tmpObjects",nullptr}},
+    {{kGame,kPerformNs,"TmpObjectInst","m_entityRenderHelper",nullptr}},
+    {{kGame,kView,"EntityRenderHelper","m_entityVFX",nullptr}},
+    {{"Rendering.Beyond.dll","Beyond.Rendering","EntityVFXControllerBase","m_owner",nullptr}},
 };
 static_assert(std::size(g_fields) == FieldCount);
 
@@ -287,6 +364,8 @@ ClassParentFn g_class_parent = nullptr;
 void* g_particle_type = nullptr;
 uint32_t g_particle_type_root = 0;
 int g_particle_stop_clear = -1;
+bool g_ending_splash_skip_contract = false;
+bool g_hierarchy_contract = false;
 thread_local void* g_main_flow_handle = nullptr;
 
 struct ParticleHold { void* object = nullptr; uint32_t root = 0; bool loop = false; float duration = 0; };
@@ -333,6 +412,15 @@ struct Session {
     uint32_t spdash_interrupts_suppressed = 0;
     int last_interrupt_reason = -1;
     int last_interrupt_type = -1;
+    bool features_failed = false;
+    bool rewound = false;
+    uint64_t side_rewind_tick[3]{};
+    uint32_t dash_sound_event = 0, dash_sound_playing = 0;
+    void* vfx[8]{};
+    int vfx_count = 0;
+    bool vfx_frozen = false;
+    void* vfx_helpers[3]{};
+    int vfx_helper_count = 0;
 };
 // Only game-thread hooks access the session. Configuration callbacks publish an
 // immutable snapshot; no Unity/managed calls are made on the settings thread.
@@ -351,9 +439,29 @@ int g_sp_dash_end = -1, g_force_exit = -1;
 int g_blend_style = -1, g_blend_interrupt = -1, g_audio_none = -1;
 uint32_t g_flying_stop_hashes[kCharacterCount]{};
 
+// Called only by game-thread session consumers. New Jsspsi-only settings must
+// not retire a legacy character's dash or its v12 clock. All other fields retain
+// the upstream invalidation rule; Jsspsi retains full snapshot invalidation.
+bool RefreshSessionConfiguration(const std::shared_ptr<const Configuration>& current) {
+    if (!g_session.config || !g_session.profile) return false;
+    if (current == g_session.config) return true;
+    const auto& profile = *g_session.profile;
+    if (profile.seam_file || profile.accessory_file || profile.capture_file) return false;
+    auto relevant = *current;
+    relevant.jsspsi_capture = g_session.config->jsspsi_capture;
+    relevant.jsspsi_seam_fix = g_session.config->jsspsi_seam_fix;
+    relevant.jsspsi_accessory_loop = g_session.config->jsspsi_accessory_loop;
+    relevant.jsspsi_accessory_mask = g_session.config->jsspsi_accessory_mask;
+    relevant.jsspsi_accessory_fade = g_session.config->jsspsi_accessory_fade;
+    if (!(relevant == *g_session.config)) return false;
+    g_session.config = current;
+    return true;
+}
 void Log(const char* message) {
     if (g_host && g_host->log) g_host->log(g_host->context, kId, message);
 }
+#include "dash_pose_lease.inl"
+#include "dash_feature_guard.inl"
 void* Invoke(MethodId id, void* instance, void** args, bool& ok) {
     if (!ok) return nullptr;
     void* exception = nullptr;
@@ -389,6 +497,14 @@ bool StringEquals(void* managed, const char* expected) {
     return managed && g_host->copy_managed_string(g_host->context,
         managed, text, sizeof(text)) > 0 && std::strcmp(text, expected) == 0;
 }
+// Side-suffixed performs accept the exact profile name or one trailing L/R.
+bool PerformMatches(void* managed, const char* expected) {
+    char text[160]{};
+    if (!managed || g_host->copy_managed_string(g_host->context, managed, text, sizeof(text)) <= 0) return false;
+    size_t length = std::strlen(expected);
+    if (std::strncmp(text, expected, length) != 0) return false;
+    return text[length] == '\0' || ((text[length] == 'L' || text[length] == 'R') && text[length + 1] == '\0');
+}
 void* OwnedPerform(void* component, const CharacterProfile* profile) {
     bool ok = true;
     if (!profile || !Value<bool>(IsPlayingPerform, component, ok) || !ok) return nullptr;
@@ -397,7 +513,7 @@ void* OwnedPerform(void* component, const CharacterProfile* profile) {
     void* unboxed = g_host->object_unbox(g_host->context, request);
     if (!unboxed) return nullptr;
     void* id = Invoke(PerformId, unboxed, nullptr, ok);
-    return ok && StringEquals(id, profile->perform_id) ? FieldObject(RequestHandle, request) : nullptr;
+    return ok && (profile->side_suffixed_perform ? PerformMatches(id, profile->perform_id) : StringEquals(id, profile->perform_id)) ? FieldObject(RequestHandle, request) : nullptr;
 }
 void* InvokeNamed(void* object, const char* name, int count, void** args, bool& ok, bool value_type = false) {
     if (!ok || !object) { ok = false; return nullptr; }
@@ -460,11 +576,14 @@ bool TargetEffectName(void* effect, int index, bool& ok) {
     return expected && _stricmp(base, expected) == 0;
 }
 void MaintainEffects() {
-    if (!g_session.component || !g_session.policy.active) return;
-    if (!g_session.profile || !g_session.profile->effects[0]) return;
+    if (!g_session.component || !g_session.policy.active || g_session.features_failed) return;
+    const bool by_slot = g_session.profile && g_session.profile->held_effect_actors != 0;
+    const uint32_t hold = by_slot ? g_session.profile->held_effect_actors : 0;
+    if (!g_session.profile || (!by_slot && !g_session.profile->effects[0])) return;
     for (int slot = 0; slot < (int)std::size(g_session.effects); ++slot) {
         auto& effect = g_session.effects[slot];
-        if (!g_session.profile->effects[slot] || effect.disabled || effect.prepared) continue;
+        const bool wanted = by_slot ? (hold & (1u << slot)) != 0 : g_session.profile->effects[slot] != nullptr;
+        if (!wanted || effect.disabled || effect.prepared) continue;
         bool ok = true;
         if (!effect.object) {
             void* dictionary = FieldObject(Effects, g_session.handle);
@@ -479,7 +598,7 @@ void MaintainEffects() {
             if (!contains) continue; // Initial asynchronous creation can still be pending.
             void* boxed_ptr = InvokeNamed(dictionary, "get_Item", 1, args, ok);
             void* object = InvokeNamed(boxed_ptr, "Lock", 0, nullptr, ok, true);
-            if (!ok || !object || !TargetEffectName(object, slot, ok)) {
+            if (!ok || !object || (!by_slot && !TargetEffectName(object, slot, ok))) {
                 if (!g_session.effect_error_logged) Log("Sustained dash v9: effect pointer/identity not ready; no VFX mutation.");
                 g_session.effect_error_logged = true;
                 continue;
@@ -494,6 +613,16 @@ void MaintainEffects() {
         void* component_args[]{g_particle_type, &inactive};
         void* array = Invoke(ComponentsInChildren, go, component_args, ok);
         int count = Value<int>(ArrayLength, array, ok);
+        if (by_slot && ok && count == 0) {
+            // Mesh/trail effects have no particles; only hold the lifetime clock.
+            effect.prepared = true;
+            if (g_session.config->diagnostics) {
+                char message[96];
+                std::snprintf(message, sizeof(message), "Sustained dash Jsspsi effects: lifetime prepared actor=%d (no particles).", slot);
+                Log(message);
+            }
+            continue;
+        }
         if (!ok || count <= 0 || count > kMaxHeldParticles) {
             if (count == 0 && ok) continue;
             RestoreEffect(effect, true);
@@ -540,6 +669,171 @@ void MaintainEffects() {
             }
         }
     }
+}
+// Optional companion contracts and shared Unity helpers use checked boundaries.
+#include "dash_calls.inl"
+void* g_transform_type = nullptr;
+void* TmpObjectAt(int slot, void* dictionary) {
+    if (!dictionary) return nullptr;
+    bool ok = true;
+    void* args[]{&slot};
+    const bool contains = DashUnbox<bool>(DashInvokeNamed(dictionary, "ContainsKey", 1, args, ok), ok);
+    return ok && contains ? DashInvokeNamed(dictionary, "get_Item", 1, args, ok) : nullptr;
+}
+void* TmpObjectAnimator(int slot, void* dictionary) {
+    bool ok = true;
+    void* instance = TmpObjectAt(slot, dictionary);
+    void* animator = DashObject(JsspsiTmpAnimator, instance, ok);
+    return ok && DashObjectAlive(animator) && DashCallCurrent() ? animator : nullptr;
+}
+void* TmpObjectAnimator(int slot) {
+    return TmpObjectAnimator(slot, OptionalField(JsspsiTmpObjects, g_session.handle));
+}
+float SeamRewindBlend(int index, float blend);
+void TickSideBeasts() {
+    const DashSessionSnapshot session;
+    DashCallScope calls([&] { return session.Current(); });
+    if (!session.Current()) return;
+    if (!g_session.profile || !g_session.profile->side_loop) return;
+    const LoopConstants c = *g_session.profile->side_loop;
+    uint64_t now = GetTickCount64();
+    for (int slot = 1; slot <= 2; ++slot) {
+        bool ok = true;
+        void* animator = TmpObjectAnimator(slot);
+        if (!session.Current()) return;
+        if (!animator) continue;
+        int layer = 0;
+        void* layer_args[]{&layer};
+        if (DashValue<bool>(InTransition, animator, ok, layer_args) || !ok) continue;
+        void* boxed = DashInvoke(CurrentState, animator, layer_args, ok);
+        void* state = DashUnboxObject(boxed, ok);
+        int hash = DashValue<int>(StateHash, state, ok);
+        float time = DashValue<float>(StateTime, state, ok);
+        if (!session.Current()) return;
+        if (!ok || !hash || time < c.begin || time > c.begin + .2f || now - g_session.side_rewind_tick[slot] < 300) continue;
+        float d = SeamRewindBlend(slot + 1, c.blend), o = c.target + (time - c.begin), transition_time = 0;
+        bool blend_root_motion = false;
+        void* fade_args[]{&hash, &d, &layer, &o, &transition_time, &g_blend_style, &g_blend_interrupt, &blend_root_motion};
+        DashInvoke(CrossFade, animator, fade_args, ok);
+        if (!session.Current()) return;
+        g_session.side_rewind_tick[slot] = now;
+    }
+}
+// Rewind mount 0 to the rider offset; its seam may choose a different blend.
+void SyncTmpObjects(float duration, float offset) {
+    const DashSessionSnapshot session;
+    DashCallScope calls([&] { return session.Current(); });
+    if (!session.Current()) return;
+    void* animator = TmpObjectAnimator(0); if (!animator) return;
+    bool ok = true; int layer = 0; void* layer_args[]{&layer};
+    void* boxed = DashInvoke(CurrentState, animator, layer_args, ok);
+    void* state = DashUnboxObject(boxed, ok);
+    int hash = DashValue<int>(StateHash, state, ok);
+    if (!ok || !hash) return;
+    float transition_time = 0; bool blend_root_motion = false;
+    void* args[]{&hash,&duration,&layer,&offset,&transition_time,&g_blend_style,&g_blend_interrupt,&blend_root_motion};
+    DashInvoke(CrossFade,animator,args,ok);
+}
+bool ReadFrame(void* component, Frame& frame, int& current_hash);
+bool DashFeaturesActive() {
+    return GetCurrentThreadId() == g_game_thread.load(std::memory_order_relaxed) &&
+        !g_stopping && g_session.component && !g_session.features_failed && g_session.profile &&
+        (g_session.profile->seam_file || g_session.profile->accessory_file || g_session.profile->freeze_render_vfx ||
+         g_session.profile->stop_start_sound || g_session.profile->skipped_effect_actors ||
+         g_session.profile->side_loop || g_session.profile->rewind_mount || g_session.profile->capture_file) &&
+        g_session.config && g_session.config->enabled && g_config.load() == g_session.config;
+}
+bool NameHas(const char* name, const char* part) {
+    if (!name || !part || !*part) return false;
+    for (const char* a = name; *a; ++a) {
+        const char* x = a; const char* y = part;
+        while (*x && *y && (*x | 0x20) == (*y | 0x20)) { ++x; ++y; }
+        if (!*y) return true;
+    }
+    return false;
+}
+bool ShouldHold(void* component);
+thread_local bool g_render_vfx_origin = false;
+using EffectVoidFn = void(__fastcall*)(void*, const void*);
+EffectVoidFn g_play_render_vfx = nullptr;
+bool OwnedDashEffect(void* effect) {
+    char name[200]{}; bool ok = true;
+    void* managed = effect ? Invoke(EffectName,effect,nullptr,ok) : nullptr;
+    return ok && managed && g_host->copy_managed_string(g_host->context,managed,name,sizeof(name)) > 0 &&
+        DashFeaturesActive() && NameHas(name,g_session.profile->owned_name_token);
+}
+void __fastcall PlayRenderVfxDetour(void* effect, const void* method) {
+    bool mine = false;
+    if (DashFeaturesActive()) GuardDashFeatures([&] { mine = g_session.profile->freeze_render_vfx && OwnedDashEffect(effect); });
+    const bool saved = g_render_vfx_origin;
+    struct Restore { bool saved; ~Restore() { g_render_vfx_origin = saved; } } restore{saved};
+    g_render_vfx_origin = mine;
+    g_play_render_vfx(effect, method);
+}
+void AddFrozenVfx(void* vfx) {
+    if (!vfx) return;
+    for (int k = 0; k < g_session.vfx_count; ++k) if (g_session.vfx[k] == vfx) return;
+    if (g_session.vfx_count < (int)std::size(g_session.vfx)) g_session.vfx[g_session.vfx_count++] = vfx;
+}
+using PlayVfxFn = void(__fastcall*)(void*, void*, const void*);
+using VfxTickFn = void(__fastcall*)(void*, float, const void*);
+PlayVfxFn g_play_vfx = nullptr;
+VfxTickFn g_vfx_tick = nullptr;
+bool FrozenVfx(void* vfx) {
+    for (int k = 0; k < g_session.vfx_count; ++k) if (g_session.vfx[k] == vfx) return true;
+    return false;
+}
+void __fastcall PlayVfxDetour(void* vfx, void* name, const void* method) {
+    if (vfx && g_render_vfx_origin && DashFeaturesActive()) GuardDashFeatures([&] { AddFrozenVfx(vfx); });
+    g_play_vfx(vfx, name, method);
+}
+void __fastcall VfxTickDetour(void* vfx, float delta, const void* method) {
+    if (DashFeaturesActive()) GuardDashFeatures([&] {
+        if (g_session.vfx_frozen && vfx && FrozenVfx(vfx) && g_session.policy.active && ShouldHold(g_session.component)) delta=0;
+    });
+    g_vfx_tick(vfx,delta,method);
+}
+// Renderer controllers keep their own Time.time clock, independent of Tick's
+// delta. The original still advances its timestamp; owned controllers receive 0.
+using VfxDeltaFn = float(__fastcall*)(void*, bool, const void*);
+VfxDeltaFn g_vfx_delta = nullptr;
+float __fastcall VfxDeltaDetour(void* controller, bool scaled, const void* method) {
+    float delta=g_vfx_delta(controller,scaled,method);
+    if (DashFeaturesActive()) GuardDashFeatures([&] {
+        if (!g_session.vfx_frozen || !controller || g_fields[JsspsiVfxOwner].resolved.offset<=0) return;
+        void* owner=*reinterpret_cast<void**>(static_cast<char*>(controller)+g_fields[JsspsiVfxOwner].resolved.offset);
+        for (int k=0;owner && k<g_session.vfx_helper_count;++k)
+            if (owner==g_session.vfx_helpers[k] && g_session.policy.active && ShouldHold(g_session.component)) { delta=0; return; }
+    });
+    return delta;
+}
+void FreezeVfx() {
+    const DashSessionSnapshot session;
+    DashCallScope calls([&] { return session.Current(); });
+    if (!session.Current()) return;
+    if (g_session.vfx_frozen || !g_session.config || !g_session.profile->freeze_render_vfx || (!g_vfx_tick && !g_vfx_delta)) return;
+    for (int slot = 0; slot < 3 && g_fields[JsspsiRenderHelper].resolved.field_info && g_fields[JsspsiHelperVfx].resolved.field_info; ++slot) {
+        void* inst = TmpObjectAt(slot, OptionalField(JsspsiTmpObjects, g_session.handle));
+        if (!session.Current()) return;
+        void* helper = OptionalField(JsspsiRenderHelper, inst);
+        if (!session.Current()) return;
+        if (helper && g_session.vfx_helper_count < (int)std::size(g_session.vfx_helpers)) g_session.vfx_helpers[g_session.vfx_helper_count++] = helper;
+        void* vfx = OptionalField(JsspsiHelperVfx, helper);
+        if (!session.Current()) return;
+        AddFrozenVfx(vfx);
+    }
+    g_session.vfx_frozen = g_session.vfx_count > 0 || g_session.vfx_helper_count > 0;
+    if (g_session.config->diagnostics && g_session.vfx_frozen)
+        Log("Sustained dash Jsspsi effects: render VFX held after first rewind.");
+}
+bool OwnedFeaturePerform(void* handle, const CharacterProfile* profile) {
+    if (!g_ending_splash_skip_contract || !handle || !profile) return false;
+    bool ok=true;
+    if (!PerformMatches(Invoke(VisualPerformId,handle,nullptr,ok),profile->perform_id) || !ok) return false;
+    void* entity=Object(VisualPerformEntity,handle,ok);
+    if (!ok || !Value<bool>(EntityValid,entity,ok)) return false;
+    void* control=Object(GetCharCtrl,entity,ok);
+    return Value<bool>(IsMain,control,ok) && ok;
 }
 void* CurrentRequestHandle(void* component) {
     void* request = FieldObject(Request, component);
@@ -603,15 +897,71 @@ bool ReadFrame(void* component, Frame& frame, int& current_hash) {
     }
     return ok;
 }
+// Optional visual frames must stop between managed calls when their owner changes.
+bool ReadDashFrame(void* component, Frame& frame, int& current_hash) {
+    bool ok = true;
+    void* animator = DashObject(GetAnimator, component, ok);
+    if (!ok) return false;
+    int layer = 0;
+    void* args[]{&layer};
+    frame.transitioning = DashValue<bool>(InTransition, animator, ok, args);
+    void* boxed = DashInvoke(CurrentState, animator, args, ok);
+    void* state = DashUnboxObject(boxed, ok);
+    current_hash = DashValue<int>(StateHash, state, ok);
+    frame.time = DashValue<float>(StateTime, state, ok);
+    frame.length = DashValue<float>(StateLength, state, ok);
+    // Unity may strip this diagnostic getter. Its absence or invocation failure
+    // must not invalidate the state/time/length needed to maintain the dash.
+    frame.clip_loop = -1;
+    if (ok && g_methods[StateLoop].resolved.method_info) {
+        bool loop_ok = true;
+        bool loop = DashValue<bool>(StateLoop, state, loop_ok);
+        if (loop_ok) frame.clip_loop = loop ? 1 : 0;
+    }
+    frame.current_special = current_hash == g_hashes[0] || current_hash == g_hashes[1];
+    if (frame.transitioning) {
+        boxed = DashInvoke(NextState, animator, args, ok);
+        state = DashUnboxObject(boxed, ok);
+        int next = DashValue<int>(StateHash, state, ok);
+        frame.next_hash = next;
+        frame.next_time = DashValue<float>(StateTime, state, ok);
+        frame.entering_special = next == g_hashes[0] || next == g_hashes[1];
+        frame.outgoing = !frame.entering_special;
+        frame.returning_to_locomotion = next == g_locomotion_hashes[0] || next == g_locomotion_hashes[1];
+    }
+    return ok;
+}
 const char* ClipLoopText(int loop) { return loop < 0 ? "unknown" : loop ? "1" : "0"; }
 void RefreshLiinoEffectsAfterPose(void* component);
 #include "external_loop.inl"
+void CaptureFrame(void* component);
+void SeamFixFrame(void* component, bool early = false);
+std::atomic_bool g_accessory_live{false};
+void AccessoryPrepareFrame(void* component);
+void AccessoryApplyFrame(void* component);
+void AccessoryFadeFrame(void* component);
+bool AccessoryFrameSnapshot(void* component, Frame& frame, int& hash);
+std::unordered_set<void*> AccessoryClaimsSnapshot(void* component);
+bool AccessoryDefersSeam(void* component);
 #include "pose_overlay.inl"
+#include "unity_hierarchy.inl"
+#include "capture.inl"
+#include "seam_fix.inl"
+#include "accessory_overlay.inl"
 void Cancel(const char* reason, bool stop_perform, bool restore_parameter = true) {
+    std::lock_guard<std::recursive_mutex> lock(g_feature_mutex);
     if (!g_session.component) return;
+    const bool allow_accessory_fade = !CaptureActive();
+    if (g_stopping) DiscardCapture(); else GuardDashFeatures([&] { CaptureEnd(); });
     Session old = std::move(g_session);
     g_session = {};
-    if (g_pose_owner.component == old.component) g_pose_owner.clock.End();
+    // Publish the ended dash before handing its pose lease to the fade owner.
+    CancelAccessory(allow_accessory_fade);
+    auto fade_owner=AccessoryOwnerSnapshot();
+    if (g_dash_pose && (!fade_owner || !fade_owner->fading || fade_owner->lease_context!=g_dash_pose)) g_dash_pose->End();
+    ReleaseSeam();
+    g_dash_pose.reset();
+    if (!g_session.component && g_pose_owner.component == old.component) g_pose_owner.clock.End();
     if (g_external_owner.component == old.component) g_external_owner.pending_restore = true;
     const bool restore_effects = !g_stopping && GetCurrentThreadId() == g_game_thread.load(std::memory_order_relaxed);
     for (auto& effect : old.effects) RestoreEffect(effect, restore_effects);
@@ -637,10 +987,22 @@ void Cancel(const char* reason, bool stop_perform, bool restore_parameter = true
     if (old.root) g_host->gchandle_free(g_host->context, old.root);
     if (old.handle_root) g_host->gchandle_free(g_host->context, old.handle_root);
 }
+void FailDashFeatures() noexcept {
+    try {
+        std::lock_guard<std::recursive_mutex> lock(g_feature_mutex);
+        if (g_session.features_failed) return;
+        g_session.features_failed=true; g_session.rewound=false; g_session.vfx_frozen=false;
+        if (g_dash_pose) g_dash_pose->End();
+        auto owner=AccessoryOwnerSnapshot(); if (owner && owner->lease_context) owner->lease_context->End();
+        EndAccessory("feature exception"); ReleaseSeam(); g_dash_pose.reset();
+        DiscardCapture();
+        Log("Sustained dash Jsspsi: features disabled for this dash after an exception.");
+    } catch (...) {}
+}
 bool HoldContext(void* component);
 bool ShouldHold(void* component) {
-    if (g_stopping || !component || component != g_session.component ||
-        g_config.load() != g_session.config || !g_session.config->enabled) return false;
+    if (g_stopping || g_session.features_failed || !component || component != g_session.component ||
+        !RefreshSessionConfiguration(g_config.load()) || !g_session.config->enabled) return false;
     if (!CanMove(component) || CurrentRequestHandle(component) != g_session.handle) return false;
     return HoldContext(component);
 }
@@ -700,6 +1062,31 @@ bool CleanLiinoPerform(void* handle, void* target = nullptr) {
     return Value<bool>(IsMain, control, ok) && ok;
 }
 void __fastcall EffectActionPlayDetour(void* action, const void* method) {
+    if (action && !g_stopping && g_ending_splash_skip_contract &&
+        GetCurrentThreadId() == g_game_thread.load(std::memory_order_relaxed)) {
+        try {
+            const auto config = g_config.load();
+            uint32_t skipped_actors = 0;
+            for (size_t i = 0; i < kCharacterCount; ++i)
+                if (config->characters & (1u << i)) skipped_actors |= kCharacters[i].skipped_effect_actors;
+            if (config->enabled && !config->jsspsi_capture && skipped_actors) {
+                // Check the actor fields before any managed identity getter.
+                void* data = FieldObject(VisualActionData, action);
+                bool ok = data != nullptr;
+                const int actor = ok ? Unbox<int>(FieldObject(ActionIndex, data), ok) : -1;
+                if (ok && actor >= 0 && actor < 32) {
+                    for (size_t i = 0; i < kCharacterCount; ++i) {
+                        const auto& profile = kCharacters[i];
+                        if (!(config->characters & (1u << i)) || !(profile.skipped_effect_actors & (1u << actor))) continue;
+                        if (OwnedFeaturePerform(FieldObject(VisualActionHandle, action), &profile) &&
+                            !g_stopping && g_config.load() == config) return;
+                    }
+                }
+            }
+        } catch (...) {
+            Log("Sustained dash Jsspsi effects: splash identity failed; native action retained.");
+        }
+    }
     // All EffectPlayActions belonging to this exact perform are cosmetic:
     // entry/exit particles, continuous trails, and material dissolve/glow VFX.
     if (action && !g_stopping && g_liino_clean_contract &&
@@ -730,8 +1117,8 @@ void __fastcall EffectActionPlayDetour(void* action, const void* method) {
 // reaches _TryExit. The pinned handle remains the ownership proof for the
 // two exit hooks, so this context deliberately omits that transient predicate.
 bool HoldContext(void* component) {
-    if (g_stopping || !component || component != g_session.component ||
-        g_config.load() != g_session.config || !g_session.config->enabled ||
+    if (g_stopping || g_session.features_failed || !component || component != g_session.component ||
+        !RefreshSessionConfiguration(g_config.load()) || !g_session.config->enabled ||
         !CanMove(component)) return false;
     // Keep the natural entry alive until the Animator sees Dash's CrossFade.
     if (g_session.policy.WithinEntryWindow()) return true;
@@ -744,7 +1131,9 @@ bool HoldContext(void* component) {
 void __fastcall EffectDurationDetour(void* instance, float delta, const void* method) {
     if (GetCurrentThreadId() == g_game_thread.load(std::memory_order_relaxed)) {
         for (auto& effect : g_session.effects) {
-            if (effect.object == instance && effect.prepared && ShouldHold(g_session.component)) {
+            if (effect.object == instance && effect.prepared &&
+                (!g_session.profile || !g_session.profile->held_effect_actors || g_session.rewound) &&
+                ShouldHold(g_session.component)) {
                 if (++effect.ticks == 1 && g_session.config->diagnostics)
                     Log("Sustained dash v9: held target effect lifetime/auto-fade clock; particles keep simulating.");
                 delta = 0; // Only the effect lifetime clock, not ParticleSystem/FollowTick.
@@ -912,7 +1301,54 @@ bool DeferFlyingStop(uint32_t hash) {
     g_session.deferred_flying_stop = true;
     return true;
 }
+// Scope the dash-start audio capture to this character or its companions.
+thread_local bool g_audio_origin = false;
+struct AudioOriginScope {
+    bool saved;
+    explicit AudioOriginScope(bool origin) : saved(g_audio_origin) { g_audio_origin = origin; }
+    ~AudioOriginScope() { g_audio_origin = saved; }
+};
+bool AnimAudioOrigin(void* mono) {
+    if (!mono || !DashFeaturesActive() || !g_session.profile->stop_start_sound || !g_methods[ClipName].resolved.method_info) return false;
+    char name[120] = "";
+    bool ok = true;
+    void* managed = Invoke(ClipName, mono, nullptr, ok);
+    if (ok && managed) g_host->copy_managed_string(g_host->context, managed, name, sizeof(name));
+    return NameHas(name,g_session.profile->owned_name_token) || NameHas(name,g_session.profile->companion_name_filter);
+}
+using PostEventFn = uint32_t(__fastcall*)(uint32_t, uint64_t, int, void*, void*, const void*);
+PostEventFn g_post_event = nullptr;
+uint32_t __fastcall PostEventDetour(uint32_t id, uint64_t go, int type, void* callback, void* cookie, const void* method) {
+    const uint32_t playing = g_post_event(id, go, type, callback, cookie, method);
+    if (g_audio_origin && DashFeaturesActive() && g_session.profile->stop_start_sound) GuardDashFeatures([&] {
+        if ( !g_session.dash_sound_playing && !g_session.rewound && playing) {
+            g_session.dash_sound_event = id;
+            g_session.dash_sound_playing = playing;
+        }
+    });
+    return playing;
+}
+void StopDashSound() {
+    const DashSessionSnapshot session;
+    if (!session.Current()) return;
+    if (!g_session.config || !g_session.profile->stop_start_sound || !g_session.dash_sound_playing || !g_methods[JsspsiStopPlaying].resolved.method_info) return;
+    uint32_t playing = g_session.dash_sound_playing;
+    int fade = kJsspsiSoundFadeMs;
+    void* args[]{&playing, &fade};
+    void* exception = nullptr;
+    g_host->runtime_invoke(g_host->context, g_methods[JsspsiStopPlaying].resolved.method_info, nullptr, args, &exception);
+    if (!session.Current()) return;
+    if (session.config->diagnostics) {
+        char text[160];
+        std::snprintf(text, sizeof(text), "Sustained dash Jsspsi audio: dash sound stopped: event=%u playing=%u%s", g_session.dash_sound_event, playing, exception ? " (exception)" : "");
+        Log(text);
+    }
+    g_session.dash_sound_playing = 0;
+}
 void __fastcall AudioMonoDetour(void* mono, uint32_t hash, float clip_in, const void* method) {
+    bool origin = false;
+    if (DashFeaturesActive()) GuardDashFeatures([&] { origin = AnimAudioOrigin(mono); });
+    AudioOriginScope scope(origin);
     if (GetCurrentThreadId() == g_game_thread.load(std::memory_order_relaxed) &&
         hash == SessionFlyingStopHash() && g_session.component) {
         bool ok = true;
@@ -923,6 +1359,8 @@ void __fastcall AudioMonoDetour(void* mono, uint32_t hash, float clip_in, const 
 }
 uint32_t __fastcall AudioEntityDetour(void* entity, uint32_t hash, int callback_type,
     void* callback, void* cookie, const void* method) {
+    const bool origin = DashFeaturesActive() && g_session.profile->stop_start_sound && entity == g_session.entity;
+    AudioOriginScope scope(origin);
     if (GetCurrentThreadId() == g_game_thread.load(std::memory_order_relaxed) &&
         entity == g_session.entity && !callback && !cookie && callback_type == g_audio_none && DeferFlyingStop(hash))
         return 0; // No playing instance or callback was requested for this deferred stop.
@@ -961,8 +1399,21 @@ void __fastcall CommandDetour(void* handle, int reason, int type, bool weak, con
     g_add_command(handle, reason, type, weak, method);
 }
 void __fastcall StartDetour(void* component, int index, const void* method) {
+    SuspendDashCalls suspended_calls;
     g_game_thread.store(GetCurrentThreadId(), std::memory_order_relaxed);
-    g_start(component, index, method);
+    std::lock_guard<std::recursive_mutex> feature_lock(g_feature_mutex);
+    bool main_character=false;
+    if (g_accessory_live.load(std::memory_order_relaxed)) GuardDashFeatures([&] {
+        bool ok=true; void* entity=Object(GetEntity,component,ok);
+        void* control=ok && Value<bool>(EntityValid,entity,ok) ? Object(GetCharCtrl,entity,ok) : nullptr;
+        main_character=Value<bool>(IsMain,control,ok) && ok;
+    });
+    {
+        // Native Start can cancel the preceding dash reentrantly. Its Cancel
+        // must not start a new fade, even if this new perform is not handled here.
+        AccessoryStartScope accessory_start(main_character);
+        g_start(component, index, method);
+    }
     auto config = g_config.load();
     if (g_stopping || !config->enabled || !component || index < 0) return;
     const CharacterProfile* profile = nullptr;
@@ -982,7 +1433,10 @@ void __fastcall StartDetour(void* component, int index, const void* method) {
     if (!handle) return;
     // Repeated calls for the same perform are not a fresh animation session.
     if (g_session.component == component && g_session.handle == handle) return;
+    EndAccessory();
     Cancel("new special dash", true);
+    // A failed post-dash fade may have flagged an otherwise idle session.
+    g_session = {};
     g_session.component = component;
     g_session.handle = handle;
     g_session.config = config;
@@ -995,12 +1449,21 @@ void __fastcall StartDetour(void* component, int index, const void* method) {
     g_session.handle_root = g_host->gchandle_new(g_host->context, handle, 1);
     if (!g_session.root || !g_session.handle_root) Cancel("root failed", false);
     else {
+        if (profile->seam_file || profile->accessory_file) GuardDashFeatures([&] {
+            auto lease_context=std::make_shared<DashPoseContext>(); lease_context->component=component; lease_context->handle=handle;
+            lease_context->diagnostics=config->diagnostics; g_dash_pose=std::move(lease_context);
+        });
         if (config->external_loop) {
             BeginPoseOverlay(component, profile);
         }
         if (!g_session.external_expected && g_external_owner.component == component) {
             Cancel("external controller rollback pending", true); return;
         }
+        if (config->jsspsi_capture && profile->capture_file) {
+            g_session.loop.c.begin = kCaptureNoRewind; // Preserve native animation throughout this captured dash.
+            GuardDashFeatures([&] { CaptureBegin(component, profile); });
+        }
+        if (profile->accessory_file && config->jsspsi_accessory_loop && !config->jsspsi_capture) GuardDashFeatures([&] { BeginAccessory(component); });
         if (config->diagnostics) {
             char text[160];
             std::snprintf(text, sizeof(text), "Sustained dash armed for %s: left_hash=%d, right_hash=%d", profile->codename, g_hashes[0], g_hashes[1]);
@@ -1011,12 +1474,13 @@ void __fastcall StartDetour(void* component, int index, const void* method) {
 void __fastcall PreLateDetour(void* component, float delta, const void* method) {
     ExternalRestoreWhenIdle(component);
     if (g_session.component) {
-        if (g_stopping || g_config.load() != g_session.config)
+        if (g_session.features_failed) Cancel("optional feature exception", true);
+        else if (g_stopping || !RefreshSessionConfiguration(g_config.load()))
             Cancel("configuration changed", true);
         else if (!CanMove(g_session.component))
             Cancel("movement or owner ended", true);
         else if (g_session.component == component) {
-            void* observed_handle = g_session.handle;
+            const DashSessionSnapshot observed_session;
             Frame frame;
             frame.delta = delta;
             frame.allowed = CurrentRequestHandle(component) == g_session.handle;
@@ -1055,20 +1519,37 @@ void __fastcall PreLateDetour(void* component, float delta, const void* method) 
             } else if (loop_action == LoopAction::Blend) {
                 bool ok = true;
                 int layer = 0;
-                float duration = g_session.external_confirmed ? 0.0f : g_session.loop.c.blend;
+                float duration = g_session.external_confirmed ? 0.0f : SeamRewindBlend(0, g_session.loop.c.blend);
+                const float beast_duration = SeamRewindBlend(1, g_session.loop.c.blend);
                 float offset = g_session.external_confirmed ? ImportedLoopSchedule::TargetAt(frame.time) : g_session.loop.TargetAt(frame.time);
                 float transition_time = 0;
                 bool blend_root_motion = false;
                 void* animator = Object(GetAnimator, component, ok);
+                if (!observed_session.Current()) {
+                    g_pre_late(component, delta, method);
+                    return;
+                }
                 void* args[]{&hash, &duration, &layer, &offset, &transition_time, &g_blend_style, &g_blend_interrupt, &blend_root_motion};
-                void* expected_handle = g_session.handle;
                 if (g_session.external_confirmed) g_session.imported_loop.Submitted(frame.time);
                 else g_session.loop.Submitted(frame.time);
                 Invoke(CrossFade, animator, args, ok);
-                if (g_session.component != component || g_session.handle != expected_handle) {
+                if (!observed_session.Current()) {
                     // Managed playback may synchronously deliver a native exit.
                 } else if (ok) {
                     ++g_session.animation_replays;
+                    g_session.rewound = true;
+                    if (DashFeaturesActive()) GuardDashFeatures([&] {
+                        DashCallScope calls([&] { return observed_session.Current(); });
+                        StopDashSound();
+                        if (!observed_session.Current()) return;
+                        FreezeVfx();
+                        if (!observed_session.Current()) return;
+                        if (g_session.profile->rewind_mount) SyncTmpObjects(beast_duration,offset);
+                    });
+                    if (!observed_session.Current()) {
+                        g_pre_late(component, delta, method);
+                        return; // No diagnostics or policy updates from the retired frame.
+                    }
                     if (g_session.config->diagnostics && (g_session.animation_replays <= 4 || g_session.animation_replays % 16 == 0)) {
                         char text[240];
                         std::snprintf(text, sizeof(text), "Sustained dash %s: hash=%d, source=%.3f, target=%.3f, duration=%.3f, count=%u",
@@ -1079,11 +1560,18 @@ void __fastcall PreLateDetour(void* component, float delta, const void* method) 
                     // never fabricate a successful seek or reset frame.time.
                 } else Cancel("loop blend invocation failed", true);
             }
-            if (g_session.component && g_session.handle != observed_handle) {
+            if (!observed_session.Current()) {
                 g_pre_late(component, delta, method);
                 return; // A synchronous callback started a new session; discard the old frame.
             }
-            Decision decision = g_session.component ? g_session.policy.Update(frame) : Decision::Wait;
+            if (DashFeaturesActive() && g_session.policy.active && !g_session.config->jsspsi_capture) GuardDashFeatures([&] {
+                if (g_session.profile->side_loop) TickSideBeasts();
+            });
+            if (!observed_session.Current()) {
+                g_pre_late(component, delta, method);
+                return; // Side-beast playback can synchronously cancel or replace this dash too.
+            }
+            Decision decision = g_session.policy.Update(frame);
             if (decision == Decision::Keep) MaintainEffects();
             if (decision == Decision::Cancel) {
                 if (g_session.config->diagnostics) {
@@ -1149,6 +1637,7 @@ void __fastcall ForceCurrentDetour(void* component, bool stop_animation, const v
     g_force_current(component, stop_animation, method);
 }
 void __fastcall ReleaseDetour(void* component, bool full, const void* method) {
+    ReleaseAccessoryComponent(component);
     if (component == g_session.component) Cancel("component release", false, false);
     if (component == g_external_owner.component) RestoreExternal(true);
     if (component == g_pose_owner.component) ReleasePoseOverlay(true);
@@ -1181,6 +1670,12 @@ bool ParseCharacters(std::string_view s, uint32_t& out) {
     }
     return true;
 }
+bool ParseFadeSeconds(std::string_view value, float& result) {
+    const std::string text(value);
+    char* end = nullptr;
+    result = std::strtof(text.c_str(), &end);
+    return end != text.c_str() && *end == '\0' && std::isfinite(result) && result >= 0 && result <= 1;
+}
 BE_Result BE_CALL Configure(const char* raw) {
     auto config = std::make_shared<Configuration>();
     std::string_view remaining = raw ? raw : "";
@@ -1201,6 +1696,11 @@ BE_Result BE_CALL Configure(const char* raw) {
         else if (key == "external_loop") valid &= ParseBool(value, config->external_loop);
         else if (key == "liino_clean") valid &= ParseBool(value, config->liino_clean);
         else if (key == "characters") valid &= ParseCharacters(value, config->characters);
+        else if (key == "jsspsi_capture") valid &= ParseBool(value, config->jsspsi_capture);
+        else if (key == "jsspsi_seam_fix") valid &= ParseBool(value, config->jsspsi_seam_fix);
+        else if (key == "jsspsi_accessory_loop") valid &= ParseBool(value, config->jsspsi_accessory_loop);
+        else if (key == "jsspsi_accessory_mask") valid &= AccessoryMask(value, config->jsspsi_accessory_mask);
+        else if (key == "jsspsi_accessory_fade") valid &= ParseFadeSeconds(value, config->jsspsi_accessory_fade);
     }
     if (!valid || (config->enabled && !schema_present)) {
         // A bad live edit must never leave the old hold enabled indefinitely.
@@ -1230,8 +1730,61 @@ BE_Result BE_CALL Configure(const char* raw) {
     return BE_Result_Ok;
 }
 
+using MethodFlagsFn = uint32_t(*)(const void*, uint32_t*);
+void InitializeJsspsiContracts(MethodFlagsFn flags) {
+    for (int id=JsspsiTmpAnimator;id<MethodCount;++id) {
+        auto& method=g_methods[id].resolved;
+        uint32_t impl=0;
+        const bool expected_static=id==JsspsiPostEvent || id==JsspsiStopPlaying;
+        if (!method.method_info || !method.method_pointer ||
+            ((flags(method.method_info,&impl)&0x10u)!=0)!=expected_static) {
+            Log((std::string("Sustained dash Jsspsi contracts: unavailable ") + g_methods[id].desc.class_name + "." + g_methods[id].desc.method_name).c_str());
+            method={};
+        }
+    }
+    // Ending-splash suppression requires instance methods for perform/main-character identity.
+    g_ending_splash_skip_contract=g_effect_action_play != nullptr;
+    for (int id:{VisualActionHandle,VisualActionData,ActionIndex})
+        if (!g_fields[id].resolved.field_info) g_ending_splash_skip_contract=false;
+    for (int id:{EffectActionPlay,VisualPerformId,VisualPerformEntity,EntityValid,GetCharCtrl,IsMain}) {
+        uint32_t impl=0;
+        if (!g_methods[id].resolved.method_info || (flags(g_methods[id].resolved.method_info,&impl)&0x10u)) g_ending_splash_skip_contract=false;
+    }
+    struct Hook { MethodId id; void* detour; void** original; };
+    const Hook hooks[]{
+        {JsspsiPlayRenderVfx,reinterpret_cast<void*>(&PlayRenderVfxDetour),reinterpret_cast<void**>(&g_play_render_vfx)},
+        {JsspsiPlayVfx,reinterpret_cast<void*>(&PlayVfxDetour),reinterpret_cast<void**>(&g_play_vfx)},
+        {JsspsiVfxTick,reinterpret_cast<void*>(&VfxTickDetour),reinterpret_cast<void**>(&g_vfx_tick)},
+        {JsspsiVfxDelta,reinterpret_cast<void*>(&VfxDeltaDetour),reinterpret_cast<void**>(&g_vfx_delta)},
+        {JsspsiClothUpdate,reinterpret_cast<void*>(&ClothUpdateDetour),reinterpret_cast<void**>(&g_cloth_update)},
+        {JsspsiPostEvent,reinterpret_cast<void*>(&PostEventDetour),reinterpret_cast<void**>(&g_post_event)},
+    };
+    int installed=0;
+    for (const auto& hook:hooks) {
+        auto& method=g_methods[hook.id].resolved;
+        *hook.original=nullptr;
+        if (hook.id==JsspsiVfxDelta && (!g_fields[JsspsiVfxOwner].resolved.field_info || g_fields[JsspsiVfxOwner].resolved.offset<=0)) continue;
+        if (method.method_info && g_host->create_hook(g_host->context,kId,method.method_pointer,hook.detour,hook.original)==BE_Result_Ok) ++installed;
+        else *hook.original=nullptr;
+    }
+    BE_ResolvedClassV1 transform{};
+    if (g_host->resolve_class(g_host->context,kUnityCore,"UnityEngine","Transform",&transform)==BE_Result_Ok) g_transform_type=transform.type_object;
+    g_hierarchy_contract=g_pose_contract && g_transform_type && g_methods[ComponentGameObject].resolved.method_info && g_methods[ClipName].resolved.method_info;
+    char text[256];
+    std::snprintf(text,sizeof(text),"Sustained dash Jsspsi contracts: hooks=%d/6 tmp=%d hierarchy=%d vfx=%d clock=%d sound=%d seam=%d accessory=%d splashes=%d",
+        installed,g_fields[JsspsiTmpObjects].resolved.field_info && g_methods[JsspsiTmpAnimator].resolved.method_info,
+        g_transform_type && g_methods[ComponentGameObject].resolved.method_info,
+        g_play_render_vfx && g_play_vfx && g_vfx_tick,g_vfx_delta!=nullptr,
+        g_post_event && g_methods[JsspsiStopPlaying].resolved.method_info,g_hierarchy_contract,
+        g_hierarchy_contract && g_pose_leases,g_ending_splash_skip_contract);
+    Log(text);
+}
+
 BE_Result BE_CALL Initialize(const BE_HostApiV1* host) {
-#if defined(_WIN32) || defined(BE_TEST_PC_POSE)
+    // Android links the registry into this library for Jsspsi seam/accessory writers.
+    // Its v12 overlay still uses the upstream lease-free path; Windows v12 and
+    // Jsspsi both use the shared Host registry obtained through the exported API.
+#if defined(_WIN32) || defined(__ANDROID__) || defined(BE_TEST_PC_POSE)
 #if defined(__ANDROID__)
     g_pose_leases = BetterEndfieldNext_GetPoseLeaseApiV1();
 #else
@@ -1257,6 +1810,7 @@ BE_Result BE_CALL Initialize(const BE_HostApiV1* host) {
                 continue;
             }
             Log((std::string("Missing action method: ") + method.desc.class_name + "." + method.desc.method_name).c_str());
+            if (&method >= &g_methods[JsspsiTmpAnimator]) { method.resolved = {}; continue; }
             if (&method == &g_methods[MeshGroupShow]) { g_mesh_group_contract = false; continue; }
             if (&method == &g_methods[EffectActionPlay]) { g_liino_teardown_contract = false; continue; }
             if (&method == &g_methods[EffectManualFollow]) { g_effect_follow_contract = false; continue; }
@@ -1269,13 +1823,13 @@ BE_Result BE_CALL Initialize(const BE_HostApiV1* host) {
     for (auto& field : g_fields) {
         if (host->resolve_field(host->context, &field.desc, &field.resolved) != BE_Result_Ok) {
             Log((std::string("Missing action field: ") + field.desc.field_name).c_str());
+            if (&field >= &g_fields[JsspsiTmpObjects]) { field.resolved = {}; continue; }
             if (&field >= &g_fields[VisualActionHandle]) { g_liino_teardown_contract = false; continue; }
             return BE_Result_ContractMismatch;
         }
     }
     // Protect against the easy-to-miss static ShouldInterruptSpDash ABI.
-    using FlagsFn = uint32_t(*)(const void*, uint32_t*);
-    auto flags = reinterpret_cast<FlagsFn>(GetProcAddress(GetModuleHandleW(L"GameAssembly.dll"), "il2cpp_method_get_flags"));
+    auto flags = reinterpret_cast<MethodFlagsFn>(GetProcAddress(GetModuleHandleW(L"GameAssembly.dll"), "il2cpp_method_get_flags"));
     if (!flags) return BE_Result_ContractMismatch;
     for (int i = Start; i <= Release; ++i) {
         uint32_t impl = 0;
@@ -1426,6 +1980,7 @@ BE_Result BE_CALL Initialize(const BE_HostApiV1* host) {
         g_pose_contract = false;
         Log("Sustained dash v12: TailLate hook unavailable; pose overlay disabled, native v9 hold remains.");
     }
+    InitializeJsspsiContracts(flags);
     Log("Actions module ready; scoped to character special dashes, disabled by default.");
     return BE_Result_Ok;
 }
@@ -1433,8 +1988,13 @@ void BE_CALL Shutdown() {
     g_stopping = true;
     if (!g_host) return;
     g_host->release_module_hooks(g_host->context, kId);
+    std::lock_guard<std::recursive_mutex> feature_lock(g_feature_mutex);
+    ReleaseSeam();
+    if (g_dash_pose) g_dash_pose->End();
     // Host unload is during shutdown. Do not invoke Unity on this worker thread.
+    EndAccessory();
     Cancel("module shutdown", false, false);
+    g_dash_pose.reset();
     RestoreExternal(false);
     FreeExternalAssets(false);
     ReleasePoseOverlay(false);
@@ -1442,7 +2002,7 @@ void BE_CALL Shutdown() {
     g_particle_type_root = 0;
     g_particle_type = nullptr;
 }
-const BE_ModuleApiV1 kApi{{kId, "Sustained Dash", "1.13.6", BETTER_ENDFIELD_NEXT_MODULE_ABI_V1},
+const BE_ModuleApiV1 kApi{{kId, "Sustained Dash", "1.14.0", BETTER_ENDFIELD_NEXT_MODULE_ABI_V1},
     &Initialize, &Configure, &Shutdown};
 } // namespace
 } // namespace BetterEndfieldNext::Actions

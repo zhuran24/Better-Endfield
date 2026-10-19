@@ -66,6 +66,7 @@ final class ModuleSettings {
     private static final String DASH_LIINO_CLEAN = "dash_liino_clean";
     private static final String DASH_AGLINA = "dash_character_aglina";
     private static final String DASH_LIINO = "dash_character_liino";
+    private static final String DASH_JSSPSI = "dash_character_jsspsi";
     static final String ACTIONS_CONFIGURATION = "actions_configuration";
     static final String MEDIA_CONFIGURATION = "media_screen_configuration";
     static final String MEDIA_SETTINGS = "media_screen_settings";
@@ -444,8 +445,13 @@ final class ModuleSettings {
     }
 
     static boolean isDashCharacterEnabled(Context context, String codename) {
-        return preferences(context).getBoolean(
-                "liino".equals(codename) ? DASH_LIINO : DASH_AGLINA, true);
+        SharedPreferences settings = preferences(context);
+        if ("jsspsi".equals(codename)) {
+            // Preserve explicit selections on upgrade; new installs opt in to all characters.
+            boolean fresh = !settings.contains(DASH_AGLINA) && !settings.contains(DASH_LIINO);
+            return settings.getBoolean(DASH_JSSPSI, fresh);
+        }
+        return settings.getBoolean("liino".equals(codename) ? DASH_LIINO : DASH_AGLINA, true);
     }
 
     static void setSustainedDashSettings(
@@ -453,12 +459,17 @@ final class ModuleSettings {
             boolean enabled,
             boolean liinoClean,
             boolean aglina,
-            boolean liino) {
+            boolean liino,
+            boolean jsspsi) {
         StringBuilder characters = new StringBuilder();
         if (aglina) characters.append("aglina");
         if (liino) {
             if (characters.length() > 0) characters.append(',');
             characters.append("liino");
+        }
+        if (jsspsi) {
+            if (characters.length() > 0) characters.append(',');
+            characters.append("jsspsi");
         }
         // With no character selected the desktop module would arm every one of
         // them, because an absent key means "all" for older configurations.
@@ -467,9 +478,11 @@ final class ModuleSettings {
                 ? "schema_version=3\n"
                         + "enabled=true\n"
                         + "diagnostics=true\n"
-                // The bone-pose overlay is not optional on Android: the banks ship
-                // in the APK and are materialized before the module starts, so the
-                // looping segment always runs from them rather than the native-only hold.
+                // The bone-pose overlay is not optional on Android for characters
+                // with banks: they ship in the APK and are materialized before the
+                // module starts, so their looping segment always uses those poses.
+                // external_loop=true only affects characters with a pose bank;
+                // Jsspsi uses native Animator rewinds and separate seam/accessory data.
                         + "external_loop=true\n"
                         + "liino_clean=" + liinoClean + "\n"
                         + "characters=" + characters + "\n"
@@ -480,6 +493,7 @@ final class ModuleSettings {
                 .putBoolean(DASH_LIINO_CLEAN, liinoClean)
                 .putBoolean(DASH_AGLINA, aglina)
                 .putBoolean(DASH_LIINO, liino)
+                .putBoolean(DASH_JSSPSI, jsspsi)
                 .putString(ACTIONS_CONFIGURATION, configuration)
                 .commit();
     }
@@ -498,7 +512,8 @@ final class ModuleSettings {
                 isSustainedDashEnabled(context),
                 isLiinoCleanDashEnabled(context),
                 isDashCharacterEnabled(context, "aglina"),
-                isDashCharacterEnabled(context, "liino"));
+                isDashCharacterEnabled(context, "liino"),
+                isDashCharacterEnabled(context, "jsspsi"));
     }
 
     static synchronized void republishCameraConfiguration(Context context) {

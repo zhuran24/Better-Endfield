@@ -244,6 +244,18 @@ better_endfield_target_defaults(BetterEndfieldNext.ActionsExternalTests)
 add_executable(BetterEndfieldNext.ActionsPoseTests EXCLUDE_FROM_ALL modules/actions/pose_overlay_tests.cpp)
 better_endfield_target_defaults(BetterEndfieldNext.ActionsPoseTests)
 
+add_executable(BetterEndfieldNext.ActionsAccessoryTests EXCLUDE_FROM_ALL modules/actions/accessory_table_tests.cpp)
+better_endfield_target_defaults(BetterEndfieldNext.ActionsAccessoryTests)
+
+add_executable(BetterEndfieldNext.ActionsAccessoryOverlayTests EXCLUDE_FROM_ALL modules/actions/accessory_overlay_tests.cpp)
+better_endfield_target_defaults(BetterEndfieldNext.ActionsAccessoryOverlayTests)
+
+add_executable(BetterEndfieldNext.ActionsSeamTests EXCLUDE_FROM_ALL modules/actions/seam_table_tests.cpp)
+better_endfield_target_defaults(BetterEndfieldNext.ActionsSeamTests)
+
+add_executable(BetterEndfieldNext.ActionsJsspsiTests EXCLUDE_FROM_ALL modules/actions/jsspsi_tests.cpp)
+better_endfield_target_defaults(BetterEndfieldNext.ActionsJsspsiTests)
+
 add_library(BetterEndfieldNext.Gacha SHARED
     modules/gacha/module.cpp
 )
@@ -514,6 +526,9 @@ add_custom_target(BetterEndfieldNext.Layout ALL
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/modules/actions/assets/pose_liino.bin"
         "${BETTER_ENDFIELD_NEXT_STAGE_DIR}/modules/actions/pose_liino.bin"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/modules/actions/assets/accessory_jsspsi.bin"
+        "${BETTER_ENDFIELD_NEXT_STAGE_DIR}/modules/actions/accessory_jsspsi.bin"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/modules/gacha/betterendfieldnext.gacha.module.ini"
         "${BETTER_ENDFIELD_NEXT_STAGE_DIR}/modules/betterendfieldnext.gacha.module.ini"

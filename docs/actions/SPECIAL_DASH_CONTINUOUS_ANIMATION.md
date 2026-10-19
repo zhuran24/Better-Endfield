@@ -1,6 +1,6 @@
 # 特殊冲刺动画持续播放
 
-按住冲刺时，让角色保持自己的特殊冲刺动作循环播放，而不是播完一遍就回到普通疾跑。当前支持洁尔佩塔（`chr_0013_aglina`）和梨诺（`chr_0035_liino`）。启动器「冲刺持续」页的开关写入 `[betterendfieldnext.actions] enabled`；`external_loop=true` 时启用骨骼姿态覆盖，`false` 时退回只保持状态不改姿态的 v9 行为。
+按住冲刺时，让角色保持自己的特殊冲刺动作循环播放，而不是播完一遍就回到普通疾跑。当前支持洁尔佩塔（`chr_0013_aglina`）、梨诺（`chr_0035_liino`）和祀（`chr_0036_jsspsi`）。启动器「冲刺持续」页的分角色开关写入 `[betterendfieldnext.actions]` 的 `enabled`、`characters`；`external_loop=true` 时启用骨骼姿态覆盖，`false` 时退回只保持状态不改姿态的 v9 行为。祀不用 BEPOSE12 姿态数据，不受 `external_loop` 影响，改用身体接缝修正和附属件循环表（§1）。
 
 ## 1. 运行时如何工作
 
@@ -8,37 +8,41 @@
 
 **保持 Perform 不退出。** `_TryExit` 收到 `SpDashEnd + ForceExit` 时，若本次会话仍满足保持条件就返回 false；`ShouldInterruptSpDash`、`InterruptSpDashPerform`、`_TickStatePerformInterrupt` 同理。`_CheckTrackEnd` 在 End 阶段延后自然清理。所有判断都以启动时记录的 handle 为准，不依赖 `IsPlayingSpDashPerform` 这个会提前变 false 的瞬时标志。
 
-**保持 Animator 状态不走到结尾。** 每帧读归一化时间，到达 `begin` 时对同一状态发一次带偏移的 `CrossFade`，把播放位置绕回 `target`，并在随后几帧确认落点确实落在预期区间，否则中止。两个角色的出口过渡 Exit Time 都是 0.9 左右，所以回绕点必须早于 0.85。
+**保持 Animator 状态不走到结尾。** 每帧读归一化时间，到达 `begin` 时对同一状态发一次带偏移的 `CrossFade`，把播放位置绕回 `target`，并在随后几帧确认落点确实落在预期区间，否则中止。洁尔佩塔、梨诺的出口过渡 Exit Time 都是 0.9 左右，所以回绕点必须早于 0.85；模块对三个角色都在 0.85 之后放弃保持。
 
 **覆盖骨骼姿态（v12 机制）。** 在 `CharacterAnimationComponent.TailLateTick` 之后，按角色数据文件逐骨骼写入局部位移和旋转。数据是离线修好的闭合循环，有自己的时钟，与 Animator 的回绕互不依赖。写入前记录原生基线，只在自己写过且值未被原生改动时还原，退出时按基线回写。不替换 Controller、不禁用 Animator、不动世界坐标、不写缩放。
 
-角色差异集中在 `module.cpp` 的 `CharacterProfile` 表里：模板 id、Perform id、姿态数据文件、Animator 回绕常量、需要保持的持续特效名、需要延后的音频停止事件、需要延后的道具隐藏或网格组隐藏。其余 hook 对所有角色共用。
+**祀的另一套做法。** 祀没有 BEPOSE12 数据，第三部分对她不起作用。她骑的三只墨兽是 Perform 临时物体，各有自己的 Animator，模块回绕祀时把它们一起回绕。特效按 actor 编号处理：一部分保持寿命，剪辑结尾的水花（10–12 号）不生成；第一次回绕时停掉起冲音效。`TailLateTick` 之后另做两件事：身体接缝修正按运行时自录的首尾差在接缝两侧各补一半；附属件覆盖按圈内相位，把尾巴、后发换成离线做好的一整圈平稳动作。机制、取值依据、日志和边界见 [祀持续特殊冲刺的实现依据](research/1.6.3/jsspsi-dash/JSSPSI_SUSTAINED_DASH.md)，附属件见 [祀附属件平稳循环](research/1.6.3/jsspsi-dash/JSSPSI_ACCESSORY_LOOP.md)。
 
-| | 洁尔佩塔 | 梨诺 |
-| --- | --- | --- |
-| 模板 id | `chr_0013_aglina` | `chr_0035_liino` |
-| Perform | `CharIntPerform_Aglina_Spdash` | `CharIntPerform_Liino_Spdash` |
-| 源 Clip | `A_actor_aglina_sprint_dash_sp_l/r`，209 采样 / 3.4667 秒 | `A_actor_liino_sprint_dash_sp_l/r`，174 采样 / 2.8833 秒 |
-| 动作性质 | 滑翔，循环段内双脚离地 0.27–1.2 m | 踩板滑行，约 2.13 秒落地 |
-| 回绕常量 begin/target/blend/period | 136/208、80/208、18/208、56/208 | 107/173、55/173、15/173、52/173 |
-| 姿态文件 | `actions/pose_aglina.bin` | `actions/pose_liino.bin` |
-| 持续特效保持 | `P_fxbat_aglina_sprint_dash_sp_01/02` 两套粒子 | 无需处理，其特效 duration 为 -1，随 Perform 存续 |
-| 延后的音频停止 | `Aglina_SprintDashSp_Flying_Stop` | 无 |
-| 延后的隐藏动作 | 道具隐藏 logic 11 / index 0 / delay 2.4 | 网格组隐藏（2.2 秒收起滑板），经 `SetCharMeshGroupShow` 拦截 |
+角色差异集中在 `module.cpp` 的 `CharacterProfile` 表里：模板 id、Perform id、姿态数据文件、Animator 回绕常量、需要保持的持续特效名、需要延后的音频停止事件、需要延后的道具隐藏或网格组隐藏，以及祀用到的几项：Perform 名的 L/R 后缀（`side_suffixed_perform`），墨兽回绕（`rewind_mount`、`side_loop`），按编号保持和跳过的特效位图（`held_effect_actors`、`skipped_effect_actors`），墨兽渲染特效停钟和停起冲音效（`freeze_render_vfx`、`stop_start_sound`），身体接缝差表、附属件循环表和录制的文件名（`seam_file`、`accessory_file`、`capture_file`），以及认祀和墨兽的名字子串（`owned_name_token`、`companion_name_filter`）。其余 hook 对所有角色共用；祀的这几项只作用于祀的冲刺。
 
-网格组钩子是可选契约：解析不到就只关掉这一项，模块其余功能照常。
+| | 洁尔佩塔 | 梨诺 | 祀 |
+| --- | --- | --- | --- |
+| 模板 id | `chr_0013_aglina` | `chr_0035_liino` | `chr_0036_jsspsi` |
+| Perform | `CharIntPerform_Aglina_Spdash` | `CharIntPerform_Liino_Spdash` | `CharIntPerform_Jsspsi_SpdashL/R`（档案写 `CharIntPerform_Jsspsi_Spdash`，允许多一个 L/R） |
+| 源 Clip | `A_actor_aglina_sprint_dash_sp_l/r`，209 采样 / 3.4667 秒 | `A_actor_liino_sprint_dash_sp_l/r`，174 采样 / 2.8833 秒 | `A_actor_jsspsi_sprint_dash_sp_l/r`，341 采样 / 5.6667 秒 |
+| 动作性质 | 滑翔，循环段内双脚离地 0.27–1.2 m | 踩板滑行，约 2.13 秒落地 | 骑墨兽冲刺，两侧各跟一只墨兽；循环的是身下墨兽的第二步 |
+| 回绕常量 begin/target/blend/period | 136/208、80/208、18/208、56/208 | 107/173、55/173、15/173、52/173 | 0.315、0.126、0.05、0.189；两侧墨兽 0.317、0.116、0.05、0.201 |
+| 姿态文件 | `actions/pose_aglina.bin` | `actions/pose_liino.bin` | 无；改用运行时自录的身体接缝差表 `actions/seam_jsspsi.bin` 和附属件循环表 `actions/accessory_jsspsi.bin` |
+| 持续特效保持 | `P_fxbat_aglina_sprint_dash_sp_01/02` 两套粒子 | 无需处理，其特效 duration 为 -1，随 Perform 存续 | 按 actor 编号保持 0–5、13 号的寿命，墨兽渲染特效停钟；10–12 号（剪辑结尾的水花）不生成 |
+| 延后的音频停止 | `Aglina_SprintDashSp_Flying_Stop` | 无 | 无；第一次回绕时停掉起冲音效（300 ms 淡出） |
+| 延后的隐藏动作 | 道具隐藏 logic 11 / index 0 / delay 2.4 | 网格组隐藏（2.2 秒收起滑板），经 `SetCharMeshGroupShow` 拦截 | 网格组隐藏，沿用梨诺的规则（祀的会话里没触发过） |
+
+网格组钩子是可选契约：解析不到就只关掉这一项，模块其余功能照常。祀的墨兽、特效和声音也各有一组可选契约，清单见实现依据文档 §8。
 
 ## 2. 数据是怎么做出来的
 
 五步，全部是本地离线处理，不改游戏文件：
 
-1. `tmp_analysis/extract_*_animation_inputs.py` 从当前 VFS 定点取出 Controller、左右 Clip 和模型包。
+1. `extract_*_animation_inputs.py` 从当前 VFS 定点取出 Controller、左右 Clip 和模型包。
 2. `AclProbe`（ACL 2.1 官方解压接口）把 Clip 的 Transform / RootMotion / Float 三个缓冲解成每帧浮点样本。
 3. `prepare_bake.py` + Unity 2022.3.62f3 批处理 `CharBakeV1.Run`：用原 Avatar 建 `HumanPoseHandler`，把 Humanoid 通道还原成骨骼姿态，再叠加附属骨骼曲线，输出每帧 `骨骼数 × 10` 浮点。
 4. `make_loop_fine.py` 做闭合循环：在接缝两侧各取 W 帧真实源数据交叠淡化（五次平滑权重），中间区段一帧不改。
 5. `prepare_pose_overlay.py` 打包成 `BEPOSE12` v1 数据文件，剔除源片段里完全静止的骨骼和全部面部 / 视线骨骼，把口型、注视交还原生系统。
 
 梨诺自 2026-09-14 起由 `tools/actions/build_liino_glide.py` 完成第 4–5 步：改取低位源帧 46–66，交叠 ±8 后半速重采样为 40 帧周期，避免旧循环的大幅上下起伏。区间比较、复现和验收见 [梨诺低位滑翔修复](research/1.5.3/liino-dash/LIINO_LOW_GLIDE.md)。
+
+祀不走这五步。她的附属件循环表由 `tools/actions/jsspsi_accessory/` 从模块录制模式录下的左右原版冲刺生成（[生成工具](../../tools/actions/jsspsi_accessory/README.md)），身体接缝差表由模块运行时自录，都不需要 Unity。
 
 **原生 Humanoid 流的通道布局**（两角色一致，这是之前出错的地方）：0–2 Motion T，3–6 Motion Q，7–9 Root T，10–13 Root Q，14–41 四肢 IK 参考，42–142 是 **101 条 muscle**，之后是 IK 权重（洁尔佩塔 8 条、梨诺 9 条）。Unity 标准只有 95 条 muscle，映射关系是 0–28 相同、29–36 加 3、37–94 加 6；原生 29–31 与 40–42 这六条是近常量额外通道，直接丢弃。按恒等索引连续复制会把这六条塞进右大腿，正是 v12 试播「腿一直翘着」的原因。
 
@@ -60,6 +64,8 @@
 
 洁尔佩塔的映射修复另有一项独立佐证：Clip 自带的四个 IK 目标点通道不经过 muscle 映射，用它校验重建的手脚位置，两两距离平均差从 0.232 m 降到 0.076 m，双手一对从 0.511 m 降到 0.009 m。
 
+上表只针对 BEPOSE12 数据。祀的离线指标和实机观察见 [祀附属件平稳循环](research/1.6.3/jsspsi-dash/JSSPSI_ACCESSORY_LOOP.md) §4。
+
 ## 4. 部署与配置
 
 `scripts/BuildBetterEndfieldNext.ps1` 产出的 `modules/` 已自动包含模块与姿态数据文件：
@@ -69,7 +75,10 @@ modules/BetterEndfieldNext.Actions.dll
 modules/betterendfieldnext.actions.module.ini
 modules/actions/pose_aglina.bin
 modules/actions/pose_liino.bin
+modules/actions/accessory_jsspsi.bin
 ```
+
+祀的身体接缝差表 `modules/actions/seam_jsspsi.bin` 和录制文件 `modules/actions/capture_jsspsi.bin` 由模块运行时写出，不在包里，卸载时也不删。
 
 `%LOCALAPPDATA%\BetterEndfieldNext\BetterEndfieldNext.ini`：
 
@@ -81,15 +90,34 @@ external_loop=true
 diagnostics=true
 ```
 
-启动器里的开关只重写 `enabled`，会保留 `external_loop`。
+开祀，并写明她的五个键（下面都是默认值，可以省略）：
+
+```ini
+[betterendfieldnext.actions]
+schema_version=3
+enabled=true
+characters=jsspsi
+jsspsi_seam_fix=true
+jsspsi_accessory_loop=true
+jsspsi_accessory_mask=0x03
+jsspsi_accessory_fade=0.4
+jsspsi_capture=false
+diagnostics=true
+```
+
+各键的含义和取值规则见 [祀持续特殊冲刺的实现依据](research/1.6.3/jsspsi-dash/JSSPSI_SUSTAINED_DASH.md) §2。在启动器的「冲刺持续」页拨开关，或点「保存」「保存并启动」时，启动器按界面设置重写这一节（`schema_version`、`enabled`、`characters`、`liino_clean`、`diagnostics`），原样保留 `external_loop` 和祀的五个 `jsspsi_*` 键；启动器自己不写 `external_loop`。Android 生成的配置固定写 `external_loop=true`，不写祀的五个键。
 
 ## 5. 日志与验收
 
 开启诊断后应看到 `Sustained dash armed for <角色>`、`Sustained dash v12: bone-pose file loaded for <角色>`、`Sustained dash v12: bone overlay bound: matched=<骨骼数>`。`matched` 应为 226（洁尔佩塔）或 339（梨诺）。出现 `bone binding rejected` 说明必需骨骼路径与实机层级不符。
 
+祀没有姿态文件，不打印后两行；她另有 `Sustained dash Jsspsi contracts: …`、`Sustained dash Jsspsi seam: …`、`Sustained dash Jsspsi accessory: …` 等日志，一次正常冲刺的先后和各项含义见 [祀持续特殊冲刺的实现依据](research/1.6.3/jsspsi-dash/JSSPSI_SUSTAINED_DASH.md) §8。
+
 ## 6. 已知边界
 
 离线重建到 FBX / Blender 的转换已逐帧校验，但不等于与实机的 IK、布料、特效完全一致；预览不含贴图和粒子。梨诺低位循环为 0.667 秒，采用半速减缓小幅运动，仍需实机确认长时间重复的观感。武器 IK 与蝴蝶结这类附属骨骼未作单独曲线修复。
+
+祀的已知边界见 [实现依据](research/1.6.3/jsspsi-dash/JSSPSI_SUSTAINED_DASH.md) §10 和 [祀附属件平稳循环](research/1.6.3/jsspsi-dash/JSSPSI_ACCESSORY_LOOP.md) §5；游戏更新后要核的项见实现依据 §9。
 
 ---
 
@@ -99,7 +127,7 @@ diagnostics=true
 
 ### 2026-09-08 测试版本核对
 
-01:58–02:00 的测试仍打印 v2 启动标识。用户确认 `artifacts/BetterEndfieldNext-win-x64` 是复制测试包使用的目录；核对该目录的动作 DLL，大小为 180736 字节，修改时间为 2026-09-07 20:39:28，含 v2 标识、不含 v3 标识。不能将这次结果当作 v3 实机失败。已将输出目录中 186368 字节的 v3 动作 DLL 更新到该测试目录，旧文件备份在 `tmp_analysis/actions-before-v3-test-update-20260908`，并核对新标识。没有修改启动路径选择逻辑。
+测试仍打印 v2 启动标识。用户确认 `artifacts/BetterEndfieldNext-win-x64` 是复制测试包使用的目录；核对该目录的动作 DLL，大小为 180736 字节，含 v2 标识、不含 v3 标识。不能将这次结果当作 v3 实机失败。已将输出目录中 186368 字节的 v3 动作 DLL 更新到该测试目录，并核对新标识。没有修改启动路径选择逻辑。
 
 用户观察到后续体力恢复；当前保持条件已覆盖 `Dash` 以及 `Grounded + Sprint + moving`，没有把体力恢复当作退出条件。这次旧版日志也显示已跨过 `Dash → grounded Sprint`，随后才丢失 Perform。v3 效果仍需更新后的实机日志验证。
 
@@ -474,11 +502,11 @@ Aglina Perform _TryExit: command=0, reason=-1, type=-1, hold=1
 
 本轮只读取本地客户端、已有实机日志和工作区资源快照。研究对象：
 
-- `E:\Endfield Game\GameAssembly.dll`，与 `research/il2cpp-dumps/20260903-pc-current/IL2CPP_Dump_Normal/` 的方法定义对照。
+- 该版本 Windows 客户端的 `GameAssembly.dll`，与 `research/il2cpp-dumps/20260903-pc-current/IL2CPP_Dump_Normal/` 的方法定义对照。
 - `research/combat-jsondata/Data/Json/CharInteractPerformCfgs/CharIntPerform_Aglina_Spdash.json`，实际是 MemoryPack 二进制，长度 743 字节。
-- `%LocalAppData%\BetterEndfieldNext\logs\BetterEndfieldNext.log` 中 02:51:39 加载 v7、02:52:47–02:53:01 的运行记录。
+- `%LocalAppData%\BetterEndfieldNext\logs\BetterEndfieldNext.log` 中加载 v7 后的运行记录。
 
-资源解码脚本为 `tmp_analysis/inspect_aglina_perform_20260908.py`，输出 `tmp_analysis/aglina-perform-decoded-20260908.json`，包含各字段的文件字节范围。严格检查成员计数、布尔值、长度、未知类型及文件末尾；本样本消费 **743/743** 字节。没有改写输入资源，也没有计算产物哈希。
+资源解码脚本为 `inspect_aglina_perform_20260908.py`，输出 `aglina-perform-decoded-20260908.json`，包含各字段的文件字节范围。严格检查成员计数、布尔值、长度、未知类型及文件末尾；本样本消费 **743/743** 字节。没有改写输入资源，也没有计算产物哈希。
 
 字段顺序来自生成的 MemoryPack wrapper，另与原生反序列化核对：
 
@@ -488,7 +516,7 @@ Aglina Perform _TryExit: command=0, reason=-1, type=-1, hold=1
 | ObjectShowActData | `0x039985E0` | 18 | bodyType 为内联结构复制，其余 setter 顺序一致 |
 | EffectPlayActData | `0x039981C0` | 21 | bodyType 为内联结构复制，其余 setter 顺序一致 |
 
-`BodyType` 的底层类型是 **Byte**，不能按 Int32 读。校验摘要保存在 `tmp_analysis/aglina-schema-verification-20260908.json`。
+`BodyType` 的底层类型是 **Byte**，不能按 Int32 读。校验摘要保存在 `aglina-schema-verification-20260908.json`。
 
 Action union dispatcher 为 `0x0438D900`，跳转表 RVA `0x0438E1F8`：tag 32 指向 `0x0438D95F`，引用类型槽 `0x0D060B48`，与 ObjectShow 反序列化的实例创建槽一致；tag 25 指向 `0x0438D9A3`，类型槽 `0x0D060988` 与 EffectPlay 一致。因此动作类型不只是根据文件中的字符串猜测。
 
@@ -678,11 +706,11 @@ Controller 中两侧到普通 Sprint 的 Transition 均要求：
 
 ### 6. 可复核产物与读取方式
 
-- `tmp_analysis/extract_aglina_animation_inputs.py`：从当前 overlay 定点导出 Controller、Perform 及 Controller 依赖。
-- `tmp_analysis/AnimatorProbe/`：独立离线读取器，通过 bundle 自带 TypeTree 解码，不加载游戏进程。
-- `tmp_analysis/aglina-controller-raw/AC_chr_0013_aglina-spdash-summary.json` 与 `AC_chr_0013_aglina_optNew-spdash-summary.json`：状态、Clip PPtr 与全部出口条件。
-- `tmp_analysis/aglina-clips-summary-20260908.json`：两侧 Clip 长度、循环标志和完整事件表。
-- `tmp_analysis/aglina-controller-raw/*.tree.json` / `*.tree.txt`：Controller 和两条目标 Clip 的原始结构输出。
+- `extract_aglina_animation_inputs.py`：从当前 overlay 定点导出 Controller、Perform 及 Controller 依赖。
+- `research/host/1.5.3/Windows/animatorprobe/`：独立离线读取器，通过 bundle 自带 TypeTree 解码，不加载游戏进程。
+- `AC_chr_0013_aglina-spdash-summary.json` 与 `AC_chr_0013_aglina_optNew-spdash-summary.json`：状态、Clip PPtr 与全部出口条件。
+- `aglina-clips-summary-20260908.json`：两侧 Clip 长度、循环标志和完整事件表。
+- `*.tree.json` / `*.tree.txt`：Controller 和两条目标 Clip 的原始结构输出。
 
 现有 AnimeStudio AnimatorController 硬编码读取器将此版本的 `m_TOSData` 按旧字典格式读取，报 duplicate key=11。本轮改用资源自带 TypeTree，两个 Controller 均有 405 个 TypeTree 节点、两个 Clip 均有 587 个节点，完整解码时没有字节消费不匹配告警。该绕行只在独立研究读取器中完成，没有修改原工具或游戏代码。
 
@@ -772,12 +800,12 @@ Controller 的 `m_TOSData` 字符串与 `m_UserID` 对应得到：
 
 复核产物：
 
-- `tmp_analysis/AclProbe/main.cpp`、`CMakeLists.txt`：独立解压探针。
-- `tmp_analysis/analyze_aglina_pose_samples.py`：解压、维度/有限性校验、接缝筛选与图表生成。
-- `tmp_analysis/aglina-samples/{left,right}-metadata.json`：采样率、帧数、轨道数和数值校验。
-- `tmp_analysis/aglina-samples/pose-analysis.json`、`pose-timing.png`：筛选结果、轨迹与时序图。
-- `tmp_analysis/aglina-samples/{left,right}-{Transform,RootMotion,Float}.f32`：帧优先原始浮点样本，维度见 metadata；Transform 每轨为四元数 4、平移 3、缩放 3。
-- `tmp_analysis/aglina-instance-override-20260908.txt`：角色实例覆盖相关反汇编。
+- `AclProbe` 的 `main.cpp`、`CMakeLists.txt`：独立解压探针。
+- `analyze_aglina_pose_samples.py`：解压、维度/有限性校验、接缝筛选与图表生成。
+- `{left,right}-metadata.json`：采样率、帧数、轨道数和数值校验。
+- `pose-analysis.json`、`pose-timing.png`：筛选结果、轨迹与时序图。
+- `{left,right}-{Transform,RootMotion,Float}.f32`：帧优先原始浮点样本，维度见 metadata；Transform 每轨为四元数 4、平移 3、缩放 3。
+- `aglina-instance-override-20260908.txt`：角色实例覆盖相关反汇编。
 - `research/il2cpp-dumps/20260903-pc-current/IL2CPP_Dump_Normal/Gameplay.Beyond.dll.cs`：组件字段与方法签名；`UnityEngine.AnimationModule.dll.cs`：RuntimeAnimatorStateOverride 接口。
 
 本轮验证为离线资源与原生代码检查；未修改 `native/modules/actions`，未运行游戏内姿态预览或循环测试，未构建/复制游戏 DLL。
@@ -849,8 +877,8 @@ Humanoid Root 参考旋转重叠差约 23.2°，左右脚参考旋转差约 47.8
 
 ### 6. 本轮产物与验证范围
 
-- `tmp_analysis/analyze_aglina_loop_blends.py`：可重跑的有限候选筛选、两侧比较、权重敏感性、旋转/参考通道检查及图表生成。
-- `tmp_analysis/aglina-samples/loop-blend-analysis.json`：455 组筛选的各周期/混合时长最优候选及详细指标；未保存全部候选表，可由脚本重算。
+- `analyze_aglina_loop_blends.py`：可重跑的有限候选筛选、两侧比较、权重敏感性、旋转/参考通道检查及图表生成。
+- `loop-blend-analysis.json`：455 组筛选的各周期/混合时长最优候选及详细指标；未保存全部候选表，可由脚本重算。
 - [循环候选曲线图](../../research/custom_model/1.5.3/Windows/aglina-samples/loop-blend-candidates.png)：展示左侧原始高度与两种候选合成曲线，不是角色渲染或游戏录像。
 
 脚本已运行完成，验证合成周期样本数、四元数有限性/单位长度和 SLERP 两端取值。图表已打开检查。未做完整骨骼蒙皮、IK、引擎混合或实机自然度验证；未修改动作模块、构建/替换游戏 DLL。
@@ -920,9 +948,9 @@ Root Y 减 Motion Y 的局部极值如下，都是资源相对高度，不能直
 
 ### 6. 产物
 
-- `tmp_analysis/analyze_aglina_late_peaks.py`、`tmp_analysis/aglina-samples/late-peak-analysis.json`：两个后峰、邻近切点、首尾姿态/参考旋转及事件检查。
+- `analyze_aglina_late_peaks.py`、`late-peak-analysis.json`：两个后峰、邻近切点、首尾姿态/参考旋转及事件检查。
 - [后两个高点的分析图](../../research/custom_model/1.5.3/Windows/aglina-samples/late-peak-candidate.png)：完整高度曲线、后段相对第一高点的 muscle 差及峰到峰片段。
-- `tmp_analysis/analyze_aglina_full_bob.py`、`tmp_analysis/aglina-samples/full-bob-analysis.json`、`full-bob-candidates.png`：前低点到后低点的重叠混合对照。
+- `analyze_aglina_full_bob.py`、`full-bob-analysis.json`、`full-bob-candidates.png`：前低点到后低点的重叠混合对照。
 
 两份脚本均已运行并检查图表，本轮仅研究与记录，未修改动作模块或构建/替换游戏 DLL。
 
@@ -956,11 +984,11 @@ Root Y 减 Motion Y 的局部极值如下，都是资源相对高度，不能直
 
 - `BetterEndfieldNext.Actions` 和 `BetterEndfieldNext.ActionsTests` 的 Release 构建通过。
 - 策略回归覆盖 100 次循环调度、两峰相位/周期、首次原生混合、请求确认、停滞超时、帧越界、其他过渡优先、无效输入、End 自然清理条件和定点隐藏条件。
-- `tmp_analysis/verify_aglina_v8_contracts.py` 对照当前本地 dump，核对 45 个方法签名或属性访问器存在性；属性访问器的完整运行时类型契约仍由宿主解析器验证。结果为 `tmp_analysis/aglina-v8-method-contracts.json`。
+- `verify_aglina_v8_contracts.py` 对照当前本地 dump，核对 45 个方法签名或属性访问器存在性；属性访问器的完整运行时类型契约仍由宿主解析器验证。结果为 `aglina-v8-method-contracts.json`。
 - DLL 可加载并导出 `betterendfieldnext.actions / 1.7.0 / ABI 1`，目标测试包与构建输出逐字节一致；未计算产物哈希。
 - 音频依赖 `Audio.Beyond.dll` 已加入动作模块 manifest。构建单个动作目标没有刷新共享 staging manifest，交付时已从源文件同步并核对依赖行。
 
-交付文件：`artifacts/BetterEndfieldNext-win-x64/modules/BetterEndfieldNext.Actions.dll`（196096 字节）及同目录 `betterendfieldnext.actions.module.ini`。旧 DLL/manifest 保存在 `tmp_analysis/actions-before-v8-test-update-20260908-180414`。
+交付文件：`artifacts/BetterEndfieldNext-win-x64/modules/BetterEndfieldNext.Actions.dll`（196096 字节）及同目录 `betterendfieldnext.actions.module.ini`。
 
 运行日志的加载标识应为 `Actions enabled: Aglina peak-to-peak bob blend and End-track hold (v8 experimental).`；循环记录为 `Aglina v8 same-side bob blend`。重启游戏后使用现有动作模块开关测试：持续至少 10 秒，再分别停止、攻击、腾空、换人和关闭开关。尚未取得本版实机日志，不能将离线测试视作游戏内成功；尤其需要确认自转场是否被引擎接受、根运动是否正常、左侧急转轨道和手脚接缝是否可接受。
 
@@ -968,9 +996,9 @@ Root Y 减 Motion Y 的局部极值如下，都是资源相对高度，不能直
 
 ### 1. v8 实机证据修正了此前判断
 
-用户确认“武器/道具还在，发光或粒子消失”，循环可持续但存在明显接缝。本轮读取 `%LOCALAPPDATA%/BetterEndfieldNext/logs/BetterEndfieldNext.log` 最近记录，截取为 `tmp_analysis/aglina-v8-latest-log.txt`。
+用户确认“武器/道具还在，发光或粒子消失”，循环可持续但存在明显接缝。本轮读取 `%LOCALAPPDATA%/BetterEndfieldNext/logs/BetterEndfieldNext.log` 最近记录，截取为 `aglina-v8-latest-log.txt`。
 
-22:52:40 的请求为 `normalized=0.655, target_seconds=1.336, blend_seconds=0.300`，随后当前进度从约 0.704 回到 **0.087**，再经过 0.1、0.2、0.3 等入场进度；后几轮重复同样模式。状态长度 3.467 秒，因此 0.087 对应约 0.30 秒。若中段目标生效，混合完成应约在 normalizedTime **0.47**。这不是已经完成 0.933 秒目标循环的证据，而是旧调度器误将任何时间回落都当作成功。
+日志中的请求为 `normalized=0.655, target_seconds=1.336, blend_seconds=0.300`，随后当前进度从约 0.704 回到 **0.087**，再经过 0.1、0.2、0.3 等入场进度；后几轮重复同样模式。状态长度 3.467 秒，因此 0.087 对应约 0.30 秒。若中段目标生效，混合完成应约在 normalizedTime **0.47**。这不是已经完成 0.933 秒目标循环的证据，而是旧调度器误将任何时间回落都当作成功。
 
 日志同时有 `deferred owned Perform End track cleanup`，持续多轮后 deferrals 到 790；结合用户道具仍在的观察，不能再把粒子消失归咎于同一个道具隐藏问题。退出处的 Clear 保留原生行为。
 
@@ -1007,19 +1035,19 @@ EffectInstance.DurationTick 的非循环分支在 `0x02D57238` 扣减 delta，`0
 
 - Release 构建通过；`BetterEndfieldNext.ActionsTests` 包含 v8 实际错落点回归、正确中段确认及已有 100 次循环/退出测试。
 - 新 `BetterEndfieldNext.ActionsEffectsTests` 直接覆盖生产恢复/Finish 路径，以托管 API 替身验证恢复原值、回收幂等、失效对象、无关效果与关闭时不调用 Unity。它没有模拟粒子渲染。
-- 61 个方法/属性访问器与本地 dump 核对通过，结果保存为 `tmp_analysis/aglina-current-method-contracts.json`。运行时泛型 Lock 和粒子实例操作仍须实机验证。
-- 特效证据：`tmp_analysis/aglina-v9-effect-summary.json`、`aglina-v9-effect-raw/*.tree.json`、`aglina-v9-effect-bundles.json`；DurationTick 证据为 `aglina-v9-lifetime-branch.txt`。
+- 61 个方法/属性访问器与本地 dump 核对通过，结果保存为 `aglina-current-method-contracts.json`。运行时泛型 Lock 和粒子实例操作仍须实机验证。
+- 特效证据：`aglina-v9-effect-summary.json`、`aglina-v9-effect-raw/*.tree.json`、`aglina-v9-effect-bundles.json`；DurationTick 证据为 `aglina-v9-lifetime-branch.txt`。
 
 v9 启动标识：`Actions enabled: Aglina normalized bob blend and continuous particles (v9 experimental).`。重点核对循环落点约 0.47、`effect 0/1 continuous particles prepared: count=2` 和 `held target effect lifetime/auto-fade clock`；持续跑 10 秒后检查停止/攻击时粒子是否清理。当前未取得 v9 游戏内结果，不能声称已消除全部接缝或完成粒子实机验收。
 
-测试包 DLL 与 manifest 已更新至 `artifacts/BetterEndfieldNext-win-x64/modules`；导出版本 1.8.0、ABI 1，DLL 208384 字节，已与构建输出逐字节核对。旧 v8 备份：`tmp_analysis/actions-before-v9-test-update-20260908-231923`。未计算产物哈希。
+测试包 DLL 与 manifest 已更新至 `artifacts/BetterEndfieldNext-win-x64/modules`；导出版本 1.8.0、ABI 1，DLL 208384 字节，已与构建输出逐字节核对。未计算产物哈希。
 
 ## 2026-09-09：外部导出及第二版验证
 
 用户反馈 v9 衔接仍不自然，随后选择外部动画修循环的方向，并提出先看完整动作、去掉起手和收尾后保留较长中间段。外部工作已从资源解析推进至可在 Blender 查看、编辑的左右完整时长 FBX。
 
 - 现有 AnimeStudio 对目标游戏 ACL Clip 的直接 ModelConverter 结果为零条轨道，不能把“写出 FBX 成功”视为动画导出成功。本次用原 Avatar、独立解码的 ACL Transform/Humanoid 数据，经本机 Unity 2022.3.62f3 HumanPoseHandler 还原主体，叠加附属骨骼曲线，再复用现有 FBX 写出器。
-- 首版 `tmp_analysis/aglina-fbx-validation` 已按用户要求导出后暂停；存在身体/脸部网格缺失、单位缩小 100 倍及待解释的肌肉数值差。用户恢复工作后生成独立第二版 `tmp_analysis/aglina-fbx-validation-v2`，未覆盖首版 Blender 工程。
+- 首版 `aglina-fbx-validation` 已按用户要求导出后暂停；存在身体/脸部网格缺失、单位缩小 100 倍及待解释的肌肉数值差。用户恢复工作后生成独立第二版 `aglina-fbx-validation-v2`，未覆盖首版 Blender 工程。
 - 第二版补齐脸部、身体 LOD0 Mesh，每侧共 10 个网格；FBX 单位标记修正为每单位 100 厘米，Blender 中按米查看。两侧均保持 209 采样点、60 FPS、400 条 Transform 轨道。
 - 肌肉值最大差 4.5 集中于手腕旋转，前臂旋转存在约 4 的差。重新把 GetHumanPose 的结果应用回骨骼，Unity 的角度检查未检测到局部旋转差，全部层级世界位置最大变化约 0.07 毫米。因此不能把肌肉参数差直接当作几何姿态错误。
 - 逐帧 FK 对照验证：Blender 导入骨骼相对离线烘焙骨骼的位置最大差左约 0.0020 毫米、右约 0.0017 毫米；半帧对照线性位置/SLERP 参考最大差约 0.15 毫米，未发现转换引起的大幅跳变。
@@ -1029,17 +1057,17 @@ v9 启动标识：`Actions enabled: Aglina normalized bob blend and continuous p
 
 全身边界搜索已替代单看高点：在起点 0.20–1.00 秒、终点 1.867–2.733 秒的有界范围内，较长中段候选如源帧 22–125（0.367–2.083 秒）比旧 98–154 高点窗口的全身首尾匹配更接近，但选定关节的位置 RMS 仍有约 23–25 厘米，不能直接裁剪即宣称无缝。此结果只用于人工编辑候选，不是最终循环区间。
 
-第二版说明及完整证据见 `tmp_analysis/aglina-fbx-validation-v2/README.md`。本轮未修 Loop 曲线、未建立游戏外部动画加载器、未修改运行时 DLL；下一阶段是选定较长过程段并修首尾关键帧。
+第二版说明及完整证据见 `research/custom_model/1.5.3/Windows/aglina-fbx-validation-v2/README.md`。本轮未修 Loop 曲线、未建立游戏外部动画加载器、未修改运行时 DLL；下一阶段是选定较长过程段并修首尾关键帧。
 
 ## 2026-09-09：Loop 关键帧粗修验证
 
-用户随后授权“修一下关键帧，不用太精细，做验证用”。已生成 `tmp_analysis/aglina-loop-test-v1`，保留原始和第二版工程。
+用户随后授权“修一下关键帧，不用太精细，做验证用”。已生成 `aglina-loop-test-v1`，保留原始和第二版工程。
 
 使用源帧 22–125 的较长中段，每轮 1.716667 秒；首尾各 18 帧用跨边界的连续姿态过渡粗修，位置/缩放三次 Hermite、旋转球面三次 Bezier，并烘焙为每侧 400 条 Transform 轨道。源帧 41–106 的内部姿态保留，附属头发/衣摆轨道也做闭合。输出 104 个采样点，含一个闭合端点，实际周期 103 帧。
 
 FBX 已在 Blender 实际导入：左右端点骨骼位置差和抽查的第 4 轮对应姿态位置差均为 0；与烘焙结果的逐帧位置转换误差小于 0.002 毫米。生成了连续四轮的直接裁剪 / 粗修后对照 MP4，以及左右独立 Loop FBX 和 Blender 工程。接缝前后实际渲染确认粗修版消除了原裁剪在该处的身体/腿部硬跳，但未做手脚接触、衣摆穿插等精修。
 
-此阶段仅为外部关键帧验证，未建立游戏回导器、未改运行时，不能视为游戏内自然度验收。可查看入口：`tmp_analysis/aglina-loop-test-v1/aglina_loop_before_after_4cycles.mp4`；说明和指标见该目录 `README.md`。
+此阶段仅为外部关键帧验证，未建立游戏回导器、未改运行时，不能视为游戏内自然度验收。说明和指标见 `research/actions/1.5.3/Windows/aglina-loop-test-v1/README.md`。
 
 ## 2026-09-09：v10 回导测试包（Actions 1.9.0）
 
@@ -1049,29 +1077,29 @@ FBX 已在 Blender 实际导入：左右端点骨骼位置差和抽查的第 4 �
 
 运行时只给当前目标角色安装私有 AnimatorOverrideController，以原控制器为基础替换左右目标 Clip。实际 CurrentAnimatorClipInfo 确认 `BE_Aglina_Return_L/R` 后，采用零时长同状态 CrossFade 在闭合窗口回绕，并验证下一帧落点。原状态机和其他过渡保持原生优先；退出特殊状态后恢复原控制器，配置变化和组件释放也进入清理路径。依赖、Bundle 或播放确认失败时回退 v9；仍沿用 v9 的道具、粒子和 Flying_Stop 生命周期逻辑。
 
-本地验证：75 个接口描述匹配；三组 C++ 测试及 Release 编译通过。资源在原 Avatar 骨架上经 PlayableGraph 播放，首尾位置最大差约 0.0013 毫米，根运动每轮前進约 12.0167 米、侧向误差小于 0.000002 米。测试包 DLL 1.9.0 / ABI 1、动画 Bundle 8,244,849 字节，已与构建产物逐字节比对。旧模块备份为 `tmp_analysis/actions-before-v10-test-update-20260909-131805`。
+本地验证：75 个接口描述匹配；三组 C++ 测试及 Release 编译通过。资源在原 Avatar 骨架上经 PlayableGraph 播放，首尾位置最大差约 0.0013 毫米，根运动每轮前進约 12.0167 米、侧向误差小于 0.000002 米。测试包 DLL 1.9.0 / ABI 1、动画 Bundle 8,244,849 字节，已与构建产物逐字节比对。
 
-**实机待验：**构建编辑器是 2022.3.62f3，原资源头是 2021.3.34f5；还需确认游戏可加载资源、私有替换控制器能生效及回绕根运动连续。日志须出现 `external return clip confirmed active` 和 `v10 imported loop wrap` 才能判定测试到外部动画，`using v9 loop` 是降级。完整证据和试用说明见 `tmp_analysis/aglina-return-v1/README.md`。
+**实机待验：**构建编辑器是 2022.3.62f3，原资源头是 2021.3.34f5；还需确认游戏可加载资源、私有替换控制器能生效及回绕根运动连续。日志须出现 `external return clip confirmed active` 和 `v10 imported loop wrap` 才能判定测试到外部动画，`using v9 loop` 是降级。完整证据和试用说明见 `research/actions/1.5.3/Windows/aglina-return-v1/README.md`。
 
 ## 2026-09-09：首次回导失败定位与 v10.1 归档格式修复
 
-13:22:56 的宿主日志证明 Actions 1.9.0 已启用。13:24:19 加载失败并回退 v9，后续全是旧回绕；游戏 Player.log 报 `Unable to read header from archive file`，指向部署的回导包。文件与构建原件逐字节相同，失败在归档读取层，尚未进入 Animator 替换。Player.log 同时确认实际游戏引擎为 2021.3.34f5。
+宿主日志证明 Actions 1.9.0 已启用。随后加载失败并回退 v9，后续全是旧回绕；游戏 Player.log 报 `Unable to read header from archive file`，指向部署的回导包。文件与构建原件逐字节相同，失败在归档读取层，尚未进入 Animator 替换。Player.log 同时确认实际游戏引擎为 2021.3.34f5。
 
-标准 UnityFS 与游戏当前 Endfield VFS 内层包头、块目录编码不同。已实现 `tmp_analysis/AglinaBundleWrap` 转换器，保持内部序列化动画内容不变，使用原游戏包已存在的 encFlags=8 / flags=0x240 无压缩模式。现有 AnimeStudio 解码器总长度字段的 ror64(18) 有误，按实际原包应为 rol64(14)；转换器使用正确逆运算，对 209 个原始包核验长度。现有工具源码未改。
+标准 UnityFS 与游戏当前 Endfield VFS 内层包头、块目录编码不同。已实现 `research/custom_model/1.5.3/Windows/aglinabundlewrap` 转换器，保持内部序列化动画内容不变，使用原游戏包已存在的 encFlags=8 / flags=0x240 无压缩模式。现有 AnimeStudio 解码器总长度字段的 ror64(18) 有误，按实际原包应为 rol64(14)；转换器使用正确逆运算，对 209 个原始包核验长度。现有工具源码未改。
 
-输出专用包 9,764,240 字节，通过独立 VFSFile 解码及嵌入文件逐字节比较，原生样本重封装也通过。Actions 1.9.1 增加 LoadFromFile、左右 LoadAsset、Clip 属性及 pin 的分段日志。编译、三组 C++ 测试、75 项接口描述校验、DLL ABI/版本检查及部署字节比较通过。已更新 artifacts 测试目录与 stage；前一部署备份路径见 `tmp_analysis/aglina-return-v1/v10.1-backup-path.txt`。
+输出专用包 9,764,240 字节，通过独立 VFSFile 解码及嵌入文件逐字节比较，原生样本重封装也通过。Actions 1.9.1 增加 LoadFromFile、左右 LoadAsset、Clip 属性及 pin 的分段日志。编译、三组 C++ 测试、75 项接口描述校验、DLL ABI/版本检查及部署字节比较通过。已更新 artifacts 测试目录与 stage。
 
 本轮没有启动游戏，**仍未确认游戏接受转换后的归档或内部 2022 动画**。完整重启后先观察 `archive accepted by LoadFromFile`，之后仍必须有 `external return clip confirmed active` 和 `v10 imported loop wrap` 才能算实际外部播放。若归档通过但资产加载失败，下一步处理 2022→2021 序列化兼容；保留分层验证，不能仅修改版本字符串宣称兼容。
 
 ## 2026-09-10：v10.1 实机崩溃，1.9.2 关闭外部回导
 
-用户报告加载动画时游戏崩溃。保存的 Unity 转储对应 2026-09-09 22:51:37，异常为原生写访问违规 0xC0000005。根据崩溃 DLL 的精确反汇编，Actions+0x6811 位于 LoadExternalAssets 内的 LoadAsset 返回地址，证明 LoadFromFile 和 Bundle pin 已完成，尚未安装私有控制器。宿主异步日志没有保存最后阶段记录，定位以转储和指令为准。
+用户报告加载动画时游戏崩溃。2026-09-09 的 Unity 转储中，异常为原生写访问违规 0xC0000005。根据崩溃 DLL 的精确反汇编，Actions+0x6811 位于 LoadExternalAssets 内的 LoadAsset 返回地址，证明 LoadFromFile 和 Bundle pin 已完成，尚未安装私有控制器。宿主异步日志没有保存最后阶段记录，定位以转储和指令为准。
 
 元数据对比确认原版 AnimationClip 比标准 2022 包多出 8 个顶层自定义字段（含 m_aclType、m_AclCompressedBuffer），Muscle/DenseClip 与 AnimationEvent 也有定制结构。优先怀疑内部序列化布局不兼容，尚未确定引擎具体在哪个字段读错。不能将问题简化为版本号或仅认为换 2021 编辑器就能解决。
 
-已将用户配置 external_loop=false、将 artifacts/stage 的试验包重命名隔离，Actions 1.9.2 默认关闭外部导入并恢复 v9 原循环。三组测试、75 项接口描述校验、DLL 版本/ABI、部署字节比对、配置其他节保留验证均通过；未重启游戏验证。托管异常回退不能接住此原生崩溃，不采用捕获访问违规后继续运行的做法。
+已将 artifacts/stage 的试验包重命名隔离，Actions 1.9.2 默认关闭外部导入并恢复 v9 原循环。三组测试、75 项接口描述校验、DLL 版本/ABI、部署字节比对、配置其他节保留验证均通过；未重启游戏验证。托管异常回退不能接住此原生崩溃，不采用捕获访问违规后继续运行的做法。
 
-下一阶段应以原版 Clip 的原生 TypeTree、骨骼绑定和 ACL 结构为模板，把粗修轨道写回并离线解码对比，再制作新的实机候选。当前内部格式写入器尚未实现。证据、转储和恢复验证见 `tmp_analysis/aglina-return-v1/v10.1-crash-20260909-225137/analysis.md`。不要再启用前一候选包。
+下一阶段应以原版 Clip 的原生 TypeTree、骨骼绑定和 ACL 结构为模板，把粗修轨道写回并离线解码对比，再制作新的实机候选。当前内部格式写入器尚未实现。证据、转储和恢复验证见 `research/actions/1.5.3/Windows/aglina-return-v1/v10.1-crash-20260909-225137/analysis.md`。不要再启用前一候选包。
 
 ## 2026-09-10：v11 原生序列化与 ACL 写入器完成，实机待验
 
@@ -1081,9 +1109,9 @@ FBX 已在 Blender 实际导入：左右端点骨骼位置差和抽查的第 4 �
 
 合并左右对象为独立原生序列化文件，更新对象表/长度/偏移并排序；原生目录中的资源 ID、字符串路径与 preload 引用保持对应，使用独立 CAB/Bundle 身份。最终专用归档 1,107,500 字节；独立 VFS 解码与字节比较通过，两个 Clip 均由原生解析器完整读取，原生 AssetBundle 目录和完整 TypeTree 通过验证。每侧保留 19 个事件，窗口前进约 12.016709 米。
 
-Actions 1.10.0 使用游戏已有 LoadAsset(Int64, Type) 加载新包 aglina_native_return_v2.bundle；增加及时落盘的加载阶段日志。三组测试和 75 项接口描述校验通过，新增覆盖 Int64 参数传递与失败路径。另修复启动器保存整个配置或动作开关时丢弃 external_loop 的问题，保留显式开启/关闭；配置保留测试通过。当前本机恢复启用该候选，新配置默认关闭。
+Actions 1.10.0 使用游戏已有 LoadAsset(Int64, Type) 加载新包 aglina_native_return_v2.bundle；增加及时落盘的加载阶段日志。三组测试和 75 项接口描述校验通过，新增覆盖 Int64 参数传递与失败路径。另修复启动器保存整个配置或动作开关时丢弃 external_loop 的问题，保留显式开启/关闭；配置保留测试通过。新配置默认关闭。
 
-本輪没有启动游戏，仍需实机确认加载、Clip 真实播放、根运动回绕与退出。离线 FK 不包含游戏 IK/布料/粒子；四肢目标保留原目标数据并做同周期连续处理，没有用尚未确认的目标坐标约定强行重建。不能把离线验证当作游戏验收。新文档与报告见 `tmp_analysis/aglina-native-return-v2/README.md`；旧崩溃候选保持隔离。
+本輪没有启动游戏，仍需实机确认加载、Clip 真实播放、根运动回绕与退出。离线 FK 不包含游戏 IK/布料/粒子；四肢目标保留原目标数据并做同周期连续处理，没有用尚未确认的目标坐标约定强行重建。不能把离线验证当作游戏验收。新文档与报告见 `research/actions/1.5.3/Windows/aglina-native-return-v2/README.md`；旧崩溃候选保持隔离。
 
 ## 2026-09-10：用户反馈仍失败，转向 EIEM 源码研究
 
@@ -1095,11 +1123,11 @@ Actions 1.10.0 使用游戏已有 LoadAsset(Int64, Type) 加载新包 aglina_nat
 
 ## 2026-09-10：v12 运行时骨骼姿态原型
 
-用户授权尝试新路线，已实现并部署 Actions 1.11.0。现有 external_loop 开关改为选择姿态文件播放，启用分支不再调用旧 AssetBundle/外部 Controller；旧文件保留，本机配置未改。新数据 aglina_pose_v12.bin 直接来自已批准的骨骼粗修帧，399 个具名骨骼、左右各 104 点、60 Hz、103 帧周期；人物世界根和缩放不写入。此机制不依赖 95/101 的运行时转换，但未宣称最初导出阶段的通道映射问题已修复。
+用户授权尝试新路线，已实现并部署 Actions 1.11.0。现有 external_loop 开关改为选择姿态文件播放，启用分支不再调用旧 AssetBundle/外部 Controller；旧文件保留。新数据 aglina_pose_v12.bin 直接来自已批准的骨骼粗修帧，399 个具名骨骼、左右各 104 点、60 Hz、103 帧周期；人物世界根和缩放不写入。此机制不依赖 95/101 的运行时转换，但未宣称最初导出阶段的通道映射问题已修复。
 
 原生状态/移动/特效/中断继续运行，现有 v9 原生回绕保持生命周期；视觉时钟独立。目标角色 TailLateTick 原函数执行后应用位置与四元数，进入与退出采用约 0.12 秒混合。原生未重新写入的常量通道会识别并剔除本模块残留，清理时保留外部新值；按 Animator 根、骨骼归属和代次约束操作，组件释放前清理，关闭线程不调用 Unity。
 
-Release 编译、82 个接口描述、新增文件/时钟/混合/所有权清理检查和三组已有回归测试通过。本轮未启动游戏，TailLateTick 后是否仍有其他组件写回，以及真实帧开销和显示效果，尚待试播。日志须看到 TailLate pose applied 才算新路径实际写入；v9 normalized bob blend 可同时存在，不再代表新视觉路径失败。文档、备份与发布状态见 tmp_analysis/aglina-pose-overlay-v12/README.md。
+Release 编译、82 个接口描述、新增文件/时钟/混合/所有权清理检查和三组已有回归测试通过。本轮未启动游戏，TailLateTick 后是否仍有其他组件写回，以及真实帧开销和显示效果，尚待试播。日志须看到 TailLate pose applied 才算新路径实际写入；v9 normalized bob blend 可同时存在，不再代表新视觉路径失败。文档与发布状态见 research/actions/1.5.3/Windows/aglina-pose-overlay-v12/README.md。
 
 ## 2026-09-13：v12 试播“腿一直翘着”的定位与 v13 数据重做
 
@@ -1109,19 +1137,19 @@ Release 编译、82 个接口描述、新增文件/时钟/混合/所有权清理
 
 本轮完成（均未启动游戏，DLL 未改）：
 
-1. `AglinaBakeV2.cs` 按“0–28 同、29–36 加 3、37–94 加 6”重新烘焙左右完整 209 帧到 `tmp_analysis/aglina-fbx-validation-v3`。muscle 往返最大差 4.50 → 0.00004；右大腿变化幅度 0° → 97°。用 Clip 自带、与映射无关的四个 IK 目标点做独立校验：四末端两两距离与 FK 的平均差 0.232 m → 0.076 m，双手一对最大差 0.009 m。并排视频 `aglina_mapping_fix_comparison.mp4`。期间 Unity Personal 许可离线有效期过期，用户在 Hub 重新登录后恢复。
+1. `AglinaBakeV2.cs` 按“0–28 同、29–36 加 3、37–94 加 6”重新烘焙左右完整 209 帧到 `aglina-fbx-validation-v3`。muscle 往返最大差 4.50 → 0.00004；右大腿变化幅度 0° → 97°。用 Clip 自带、与映射无关的四个 IK 目标点做独立校验：四末端两两距离与 FK 的平均差 0.232 m → 0.076 m，双手一对最大差 0.009 m。并排视频 `aglina_mapping_fix_comparison.mp4`。
 2. 动作本质是滑翔：根高度 40 帧谷、98 峰、138 谷，循环段内双脚离地 0.27–1.2 m，无脚部接触问题。全身边界搜索仍选源帧 22–125（首尾位置 RMS 0.253 → 0.104 m）。
-3. `make_aglina_loop_fine.py`：接缝改为真实数据交叠淡化（起点侧源帧 0–44 与终点侧 103–147 各 22 帧，五次 smootherstep 权重），源帧 45–102 不动。身体骨骼接缝角加速度 0.1–1.0 °/帧²，低于原动作自身 99 分位（1.6–15）；头发链 3–4 对 10；端点差 0；Blender 四轮周期检查差 0。产物 `tmp_analysis/aglina-loop-fine-v1`，对照视频 `aglina_loop_before_after_4cycles.mp4`。
+3. `make_aglina_loop_fine.py`：接缝改为真实数据交叠淡化（起点侧源帧 0–44 与终点侧 103–147 各 22 帧，五次 smootherstep 权重），源帧 45–102 不动。身体骨骼接缝角加速度 0.1–1.0 °/帧²，低于原动作自身 99 分位（1.6–15）；头发链 3–4 对 10；端点差 0；Blender 四轮周期检查差 0。产物 `aglina-loop-fine-v1`，对照视频 `aglina_loop_before_after_4cycles.mp4`。
 4. `prepare_aglina_pose_overlay_v13.py`：399 → 226 根骨骼。剔除 84 根原动作中静止的骨骼（Nub、lod 网格节点、Funnel、IK_Root 等）和 89 根面部/视线骨骼（交还口型、注视、表情系统；冲刺中有语音事件）。22 根 Humanoid 骨骼全部保留并标记 required。时序参数与 v12 相同（104 点、周期 103、相位 18、入口 40/208），文件名沿用 `aglina_pose_v12.bin`。`validate_aglina_pose_bank.py` 按 PoseBank::Load 规则复核通过。
-5. 已替换 `build/native/stage/Release/modules/actions/aglina_pose_v12.bin`；备份在 `tmp_analysis/aglina-pose-overlay-v13/backup/`。线上 `artifacts/BetterEndfieldNext-win-x64` 自 2026-09-10 08:00 主线重建后已不含 Actions 模块（v12 试播日志在 `%LOCALAPPDATA%\BetterEndfieldNext\logs\BetterEndfieldNext.log.bak`，03:48–03:50，matched=399、mean_apply_us≈157），本轮未改动线上目录，而是从本工作树完整发布到 `artifacts/BetterEndfieldNext-win-x64-aglina-test`（含本分支 Actions DLL 与 v13 数据），并把 `BetterEndfieldNext.ini` 的 `[Host]`/`[Loader]` 指向该目录、加入 `[betterendfieldnext.actions]` 节（原 ini 已备份），见 v13 README“2026-09-13 21:45 测试发布”。
+5. 已替换 `build/native/stage/Release/modules/actions/aglina_pose_v12.bin`。线上 `artifacts/BetterEndfieldNext-win-x64` 自 2026-09-10 主线重建后已不含 Actions 模块（v12 试播日志在 `%LOCALAPPDATA%\BetterEndfieldNext\logs\BetterEndfieldNext.log.bak`，matched=399、mean_apply_us≈157），本轮未改动线上目录，而是从本工作树完整发布到 `artifacts/BetterEndfieldNext-win-x64-aglina-test`（含本分支 Actions DLL 与 v13 数据），并把 `BetterEndfieldNext.ini` 的 `[Host]`/`[Loader]` 指向该目录、加入 `[betterendfieldnext.actions]` 节（原 ini 已备份），见 `research/actions/1.5.3/Windows/aglina-pose-overlay-v13/README.md` 的测试发布记录。
 
-待实机确认：`bone overlay bound: matched=226`、`TailLate pose applied` 后右腿是否随循环摆动；面部交还原生后口型与注视是否正常；`wep_L` 挂点在接缝处的跳变是否可见（原动作自身即有）。加载日志里“104 samples”是 DLL 写死的文案。说明见 `tmp_analysis/aglina-fbx-validation-v3/README.md`、`aglina-loop-fine-v1/README.md`、`aglina-pose-overlay-v13/README.md`。
+待实机确认：`bone overlay bound: matched=226`、`TailLate pose applied` 后右腿是否随循环摆动；面部交还原生后口型与注视是否正常；`wep_L` 挂点在接缝处的跳变是否可见（原动作自身即有）。加载日志里“104 samples”是 DLL 写死的文案。说明见 `research/custom_model/1.5.3/Windows/aglina-fbx-validation-v3/README.md`、`research/actions/1.5.3/Windows/aglina-loop-fine-v1/README.md`、`research/actions/1.5.3/Windows/aglina-pose-overlay-v13/README.md`。
 
 ## 2026-09-14：确定版、模块通用化与梨诺接入
 
 1. 本轮把模块从单角色改成角色档案表驱动。`module.cpp` 新增 `CharacterProfile`，把模板 id、Perform id、姿态文件、Animator 回绕常量、持续特效、延后的音频停止与隐藏动作全部收进数据；`dash_policy.h` 的循环常量与道具隐藏规则改成按角色传入。日志前缀由 `Aglina …` 改为 `Sustained dash …`，模块显示名改为 `Sustained Dash`，版本 1.12.0。UI 页名改为「冲刺持续」，开关与配置属性改为 `ContinuousSpecialDash*`。姿态数据文件名改为 `actions/pose_<角色>.bin`。
 2. 梨诺的可行性已用同一条流水线验证并接入。她的 Float 通道是 152 条（muscle 段与洁尔佩塔一致，尾部多一条 IK 权重），烘焙 muscle 往返最大差 0.00023。第一次按全身位置距离矩阵选出的 40–80 窗口接缝偏硬（最差骨骼是源片段自身峰值的 1.68 倍），按「接缝抖动 ÷ 该骨骼自身源片段峰值」重新搜索后改用 52–104、交叠 ±14，比值 0.63，优于洁尔佩塔已发布循环的 0.94。
 3. 梨诺的 Perform 在 2.2 秒用 `CharMeshGroupShowActData`（logic 39/40）收起滑板，与洁尔佩塔的 `ObjectShowActData` 道具隐藏不是同一条路径。新增可选钩子 `CharPerformHandleBase.SetCharMeshGroupShow`，保持期间抑制 `show=false`；解析失败只关掉这一项。她的特效 duration 多为 -1，随 Perform 存续，不需要粒子寿命保持。
-4. Perform 配置解码器补全了 union 标签表。梨诺的配置里出现标签 13，旧解码器只认 25 和 32。这次直接从 `GameAssembly.dll` 的 union dispatcher 跳转表（RVA `0x0438E1F8`）逐标签取类型槽，再与各 `*ForMemoryPack::Deserialize` 函数体里引用的类型槽比对，解出 0–36 的完整映射（13 = `CharMeshGroupShowActData`），结果写在 `tmp_analysis/perform-union-tags.json`；用新表重解洁尔佩塔的配置，与 2026-09-08 的结果逐字段相同。
+4. Perform 配置解码器补全了 union 标签表。梨诺的配置里出现标签 13，旧解码器只认 25 和 32。这次直接从 `GameAssembly.dll` 的 union dispatcher 跳转表（RVA `0x0438E1F8`）逐标签取类型槽，再与各 `*ForMemoryPack::Deserialize` 函数体里引用的类型槽比对，解出 0–36 的完整映射（13 = `CharMeshGroupShowActData`），结果写在 `perform-union-tags.json`；用新表重解洁尔佩塔的配置，与 2026-09-08 的结果逐字段相同。
 5. 四个动作测试全部通过；姿态数据测试改为接受多个数据文件并按加载器契约逐一校验，同时跑洁尔佩塔与梨诺的数据。
-6. 新产物：`tmp_analysis/liino-fbx-validation`（烘焙与完整片段 FBX、预览）、`tmp_analysis/liino-loop-fine-v1`（循环数据、FBX、Blender 校验）、`tmp_analysis/liino-pose-overlay-v1`（姿态数据与说明）。通用化脚本：`prepare_bake.py`、`analyze_fullbody_candidates.py`、`make_loop_fine.py`、`prepare_pose_overlay.py`、`preview_loop.py`、`inspect_perform_cfg_v2.py`、`BundleTreeDump`、`CharFbxProbe`、`CharBakeV1.cs`。
+6. 新产物：`liino-fbx-validation`（烘焙与完整片段 FBX、预览）、`liino-loop-fine-v1`（循环数据、FBX、Blender 校验）、`liino-pose-overlay-v1`（姿态数据与说明）。通用化脚本：`prepare_bake.py`、`analyze_fullbody_candidates.py`、`make_loop_fine.py`、`prepare_pose_overlay.py`、`preview_loop.py`、`inspect_perform_cfg_v2.py`、`BundleTreeDump`、`CharFbxProbe`、`CharBakeV1.cs`。
